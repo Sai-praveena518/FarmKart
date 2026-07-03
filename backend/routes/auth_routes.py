@@ -1,0 +1,1 @@
+"""Authentication blueprint extraction target."""

@@ -1,0 +1,8 @@
+{
+  "appId": "com.farmersmarketdirect.ai",
+  "appName": "FarmKart",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

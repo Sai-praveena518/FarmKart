@@ -1,0 +1,1 @@
+"""Product blueprint extraction target."""

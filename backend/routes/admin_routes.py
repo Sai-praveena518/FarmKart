@@ -1,0 +1,1 @@
+"""Admin blueprint extraction target."""

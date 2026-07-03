@@ -1,0 +1,1 @@
+"""Notification blueprint extraction target."""
