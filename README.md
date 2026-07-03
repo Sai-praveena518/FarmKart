@@ -102,13 +102,13 @@ python app.py
 
 ---
 
-## 👨‍💻 Developed By
+## 👨‍💻 Project Owners
 
-**Pothula Sai Praveena**
+**Pothula Sai Praveena**  
+Co-Founder & Full Stack Developer
 
-B.Tech CSE (AI & ML)
-
----
+**Pothula Karthikeya Reddy**  
+Co-Founder & Full Stack Developer
 
 ## ⭐ Project Status
 
