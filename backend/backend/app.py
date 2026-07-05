@@ -119,7 +119,7 @@ def db_config():
 
         config = {
             "host": parsed.hostname,
-            "port": parsed.port,
+            "port": parsed.port or 3306,
             "user": parsed.username,
             "password": parsed.password,
             "database": parsed.path.lstrip("/"),
@@ -3647,8 +3647,20 @@ def create_superadmin_from_command():
     return True
 
 
+def initialize_database_on_startup():
+    try:
+        with app.app_context():
+            init_database()
+            print("Database initialized successfully")
+    except Exception as e:
+        print("Database initialization failed")
+        traceback.print_exc()
+
+
+initialize_database_on_startup()
+
+
 if __name__ == "__main__":
     if create_superadmin_from_command():
         sys.exit(0)
-    init_database()
     app.run(host=os.getenv("HOST", "0.0.0.0"), port=int(os.getenv("PORT", "5000")), debug=os.getenv("FLASK_DEBUG", "false").lower() == "true")
