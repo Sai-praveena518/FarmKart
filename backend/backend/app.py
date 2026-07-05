@@ -108,13 +108,27 @@ def invalid_jwt(reason):
     return jsonify({"message": "Unauthorized", "error": reason}), 401
 
 
+from urllib.parse import urlparse
+
 def db_config():
+    public_url = os.getenv("MYSQL_PUBLIC_URL")
+
+    if public_url:
+        parsed = urlparse(public_url)
+        return {
+            "host": parsed.hostname,
+            "port": parsed.port,
+            "user": parsed.username,
+            "password": parsed.password,
+            "database": parsed.path.lstrip("/"),
+        }
+
     return {
-        "host": os.getenv("MYSQLHOST") or os.getenv("DB_HOST") or "localhost",
-        "port": int(os.getenv("MYSQLPORT") or os.getenv("DB_PORT") or 3306),
-        "user": os.getenv("MYSQLUSER") or os.getenv("DB_USER") or "root",
-        "password": os.getenv("MYSQLPASSWORD") or os.getenv("DB_PASSWORD") or "",
-        "database": os.getenv("MYSQLDATABASE") or os.getenv("DB_NAME") or "farmers_market",
+        "host": os.getenv("MYSQLHOST") or "localhost",
+        "port": int(os.getenv("MYSQLPORT") or 3306),
+        "user": os.getenv("MYSQLUSER") or "root",
+        "password": os.getenv("MYSQLPASSWORD") or "",
+        "database": os.getenv("MYSQLDATABASE") or "farmers_market",
     }
 
 def query(sql, params=None, fetch=False, one=False):
