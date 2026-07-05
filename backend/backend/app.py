@@ -110,13 +110,12 @@ def invalid_jwt(reason):
 
 def db_config():
     return {
-        "host": os.getenv("DB_HOST") or os.getenv("MYSQL_HOST", "localhost"),
-        "port": int(os.getenv("MYSQL_PORT", "3306")),
-        "user": os.getenv("DB_USER") or os.getenv("MYSQL_USER", "root"),
-        "password": os.getenv("DB_PASSWORD") or os.getenv("MYSQL_PASSWORD", "root123"),
-        "database": os.getenv("DB_NAME") or os.getenv("MYSQL_DATABASE", "farmers_market"),
+        "host": os.getenv("MYSQLHOST") or os.getenv("DB_HOST"),
+        "port": int(os.getenv("MYSQLPORT") or 3306),
+        "user": os.getenv("MYSQLUSER") or os.getenv("DB_USER"),
+        "password": os.getenv("MYSQLPASSWORD") or os.getenv("DB_PASSWORD"),
+        "database": os.getenv("MYSQLDATABASE") or os.getenv("DB_NAME"),
     }
-
 
 def query(sql, params=None, fetch=False, one=False):
     connection = mysql.connector.connect(**db_config())
