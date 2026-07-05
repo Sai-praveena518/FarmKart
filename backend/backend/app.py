@@ -109,13 +109,15 @@ def invalid_jwt(reason):
 
 
 from urllib.parse import urlparse
+import os
 
 def db_config():
     public_url = os.getenv("MYSQL_PUBLIC_URL")
 
     if public_url:
         parsed = urlparse(public_url)
-        return {
+
+        config = {
             "host": parsed.hostname,
             "port": parsed.port,
             "user": parsed.username,
@@ -123,7 +125,19 @@ def db_config():
             "database": parsed.path.lstrip("/"),
         }
 
-    return {
+        # Debug
+        print("=" * 60)
+        print("USING MYSQL_PUBLIC_URL")
+        print("DB CONFIG:")
+        print(f"HOST     : {config['host']}")
+        print(f"PORT     : {config['port']}")
+        print(f"USER     : {config['user']}")
+        print(f"DATABASE : {config['database']}")
+        print("=" * 60)
+
+        return config
+
+    config = {
         "host": os.getenv("MYSQLHOST") or "localhost",
         "port": int(os.getenv("MYSQLPORT") or 3306),
         "user": os.getenv("MYSQLUSER") or "root",
@@ -131,6 +145,17 @@ def db_config():
         "database": os.getenv("MYSQLDATABASE") or "farmers_market",
     }
 
+    # Debug
+    print("=" * 60)
+    print("USING INDIVIDUAL MYSQL VARIABLES")
+    print("DB CONFIG:")
+    print(f"HOST     : {config['host']}")
+    print(f"PORT     : {config['port']}")
+    print(f"USER     : {config['user']}")
+    print(f"DATABASE : {config['database']}")
+    print("=" * 60)
+
+    return config
 def query(sql, params=None, fetch=False, one=False):
     connection = mysql.connector.connect(**db_config())
     cursor = connection.cursor(dictionary=True)
