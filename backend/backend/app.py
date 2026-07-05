@@ -5,6 +5,7 @@ import json
 import csv
 import io
 import shutil
+import traceback
 from functools import wraps
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -47,6 +48,50 @@ DISEASE_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 WEATHER_CACHE_SECONDS = 600
 weather_cache = {}
+
+CMS_SETTING_DEFAULTS = {
+    "application_name": "FarmKart",
+    "home_page_caption": "Your Farm. Your Market.",
+    "home_page_description": "FarmKart connects farmers directly with buyers using smart technology, real-time orders, transport sharing, and AI-powered farming tools.",
+    "footer_text": "Direct farmer-to-buyer commerce with orders, transport, AI farming tools, and verified users.",
+    "copyright_text": "Copyright FarmKart. All rights reserved.",
+    "contact_email": "saipraveenareddypothula518@gmail.com",
+    "contact_phone": "",
+    "whatsapp_number": "",
+    "office_address": "Nandyal, Andhra Pradesh, India",
+    "google_maps_location": "",
+    "facebook_link": "",
+    "instagram_link": "",
+    "youtube_link": "",
+    "linkedin_link": "",
+    "commission_percent": "0",
+    "platform_fee": "0",
+    "delivery_fee": "0",
+    "minimum_order": "1",
+    "maximum_order": "100000",
+    "payment_methods": "Pay Later,Cash on Delivery",
+    "enable_razorpay": "false",
+    "enable_phonepe": "false",
+    "enable_cod": "true",
+    "maintenance_mode": "false",
+    "app_version": "1.0.0",
+    "minimum_app_version": "1.0.0",
+    "force_update": "false",
+    "enable_registration": "true",
+    "enable_buyer_registration": "true",
+    "enable_farmer_registration": "true",
+    "enable_ai_price_prediction": "true",
+    "enable_ai": "true",
+    "enable_disease_detection": "true",
+    "enable_weather": "true",
+    "weather_api_key": "",
+    "maximum_sharing_distance": "25",
+    "maximum_farmers_per_vehicle": "4",
+    "default_transport_fee": "0",
+    "push_notification": "false",
+    "email_notification": "false",
+    "sms_notification": "false",
+}
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-this-secret-in-production")
@@ -694,6 +739,50 @@ def init_database():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS cms_banners (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          title VARCHAR(180) NOT NULL,
+          caption TEXT,
+          image_url VARCHAR(255),
+          target_url VARCHAR(255),
+          is_active BOOLEAN DEFAULT TRUE,
+          sort_order INT DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS crop_categories (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(120) NOT NULL UNIQUE,
+          description TEXT,
+          is_enabled BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS media_library (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          title VARCHAR(180),
+          file_url VARCHAR(255) NOT NULL,
+          media_type VARCHAR(60) DEFAULT 'image',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS organic_certificates (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          farmer_id INT,
+          product_id INT,
+          certificate_url VARCHAR(255),
+          status VARCHAR(40) DEFAULT 'Pending',
+          organic_badge BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS advertisements (
           id INT AUTO_INCREMENT PRIMARY KEY,
           title VARCHAR(180) NOT NULL,
@@ -739,6 +828,9 @@ def init_database():
             "unit": "VARCHAR(30) DEFAULT 'Kg'",
             "description": "TEXT",
             "status": "VARCHAR(40) DEFAULT 'Available'",
+            "is_featured": "BOOLEAN DEFAULT FALSE",
+            "is_hidden": "BOOLEAN DEFAULT FALSE",
+            "organic_badge": "BOOLEAN DEFAULT FALSE",
             "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         },
         "orders": {
@@ -804,6 +896,30 @@ def init_database():
             "details": "TEXT",
             "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         },
+        "cms_banners": {
+            "caption": "TEXT",
+            "target_url": "VARCHAR(255)",
+            "is_active": "BOOLEAN DEFAULT TRUE",
+            "sort_order": "INT DEFAULT 0",
+            "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        },
+        "crop_categories": {
+            "description": "TEXT",
+            "is_enabled": "BOOLEAN DEFAULT TRUE",
+            "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        },
+        "media_library": {
+            "title": "VARCHAR(180)",
+            "media_type": "VARCHAR(60) DEFAULT 'image'",
+        },
+        "organic_certificates": {
+            "farmer_id": "INT",
+            "product_id": "INT",
+            "certificate_url": "VARCHAR(255)",
+            "status": "VARCHAR(40) DEFAULT 'Pending'",
+            "organic_badge": "BOOLEAN DEFAULT FALSE",
+            "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        },
     }
     for table, columns in migrations.items():
         cursor.execute(f"SHOW COLUMNS FROM {table}")
@@ -858,6 +974,50 @@ def save_uploads(field_name):
             file.save(UPLOAD_FOLDER / filename)
             saved.append(filename)
     return saved
+
+
+def setting_rows():
+    rows = query("SELECT setting_key, setting_value, updated_at FROM system_settings", fetch=True)
+    return rows or []
+
+
+def settings_dict(include_defaults=True):
+    values = dict(CMS_SETTING_DEFAULTS) if include_defaults else {}
+    for row in setting_rows():
+        values[row["setting_key"]] = row.get("setting_value") or ""
+    return values
+
+
+def get_setting(setting_key, default=""):
+    return settings_dict().get(setting_key, default)
+
+
+def upsert_setting(setting_key, value):
+    query(
+        """
+        INSERT INTO system_settings (setting_key, setting_value)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)
+        """,
+        (setting_key, "" if value is None else str(value)),
+    )
+
+
+def save_setting_upload(field_name):
+    filename = save_upload(field_name)
+    return f"uploads/{filename}" if filename else None
+
+
+def parse_bool_setting(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def create_admin_log(action, details=None):
+    user = getattr(request, "user", None) or {}
+    try:
+        log_activity(user.get("id"), action, details)
+    except MySQLError:
+        traceback.print_exc()
 
 
 def attach_product_images(products):
@@ -1021,6 +1181,43 @@ def public_stats():
     })
 
 
+@app.get("/api/public/cms")
+def public_cms():
+    settings = settings_dict()
+    banners = query(
+        """
+        SELECT id, title, caption, image_url, target_url, sort_order
+        FROM cms_banners
+        WHERE is_active=TRUE
+        ORDER BY sort_order ASC, id DESC
+        """,
+        fetch=True,
+    )
+    categories = query(
+        """
+        SELECT id, name, description
+        FROM crop_categories
+        WHERE is_enabled=TRUE
+        ORDER BY name ASC
+        """,
+        fetch=True,
+    )
+    public_keys = [
+        "application_name", "logo", "splash_screen_image", "login_page_banner",
+        "home_page_hero_image", "home_page_caption", "home_page_description",
+        "footer_text", "copyright_text", "contact_email", "contact_phone",
+        "whatsapp_number", "office_address", "google_maps_location",
+        "facebook_link", "instagram_link", "youtube_link", "linkedin_link",
+        "enable_registration", "enable_buyer_registration", "enable_farmer_registration",
+        "maintenance_mode", "app_version", "minimum_app_version", "force_update",
+    ]
+    return jsonify({
+        "settings": {key: settings.get(key, "") for key in public_keys},
+        "banners": banners,
+        "categories": categories,
+    })
+
+
 @app.get("/api/public/products")
 def public_products():
     rows = query(
@@ -1032,7 +1229,7 @@ def public_products():
         LEFT JOIN users u ON u.id=p.farmer_id
         LEFT JOIN reviews r ON r.product_id=p.id
         LEFT JOIN orders o ON o.product_id=p.id
-        WHERE p.status='Available' AND p.quantity > 0
+        WHERE p.status='Available' AND p.quantity > 0 AND COALESCE(p.is_hidden, FALSE)=FALSE
         GROUP BY p.id, u.id
         ORDER BY p.id DESC
         """,
@@ -1048,7 +1245,7 @@ def public_product(product_id):
         SELECT p.*, u.name AS farmer_name, u.phone AS farmer_phone, u.village, u.district, u.state
         FROM products p
         LEFT JOIN users u ON u.id=p.farmer_id
-        WHERE p.id=%s
+        WHERE p.id=%s AND COALESCE(p.is_hidden, FALSE)=FALSE
         """,
         (product_id,),
         fetch=True,
@@ -1078,14 +1275,37 @@ def public_product(product_id):
 def register():
     data = request_data()
     required = ["name", "email", "phone", "password", "role"]
-    if any(not data.get(field) for field in required):
-        missing = [field for field in required if not data.get(field)]
-        return jsonify({"message": "Missing required fields", "missing": missing}), 400
-    requested_role = db_role(data["role"])
+    cleaned = {field: str(data.get(field) or "").strip() for field in required}
+    settings = settings_dict()
+    if not parse_bool_setting(settings.get("enable_registration", "true")):
+        return jsonify({"success": False, "message": "Registration is currently disabled."}), 403
+    if any(not cleaned[field] for field in required):
+        return jsonify({"success": False, "message": "Please fill all required fields."}), 400
+
+    email = cleaned["email"].lower()
+    phone = cleaned["phone"]
+    if "@" not in email or "." not in email.rsplit("@", 1)[-1] or not phone.isdigit() or len(phone) != 10 or len(cleaned["password"]) < 8:
+        return jsonify({"success": False, "message": "Invalid input."}), 400
+
+    requested_role = db_role(cleaned["role"])
     if requested_role not in ["Farmer", "Buyer"]:
-        return jsonify({"message": "Invalid role"}), 400
+        return jsonify({"success": False, "message": "Invalid input."}), 400
+    if requested_role == "Buyer" and not parse_bool_setting(settings.get("enable_buyer_registration", "true")):
+        return jsonify({"success": False, "message": "Buyer registration is currently disabled."}), 403
+    if requested_role == "Farmer" and not parse_bool_setting(settings.get("enable_farmer_registration", "true")):
+        return jsonify({"success": False, "message": "Farmer registration is currently disabled."}), 403
+
+    try:
+        if query("SELECT id FROM users WHERE email=%s LIMIT 1", (email,), fetch=True, one=True):
+            return jsonify({"success": False, "message": "Email already exists."}), 409
+        if query("SELECT id FROM users WHERE phone=%s LIMIT 1", (phone,), fetch=True, one=True):
+            return jsonify({"success": False, "message": "Phone number already exists."}), 409
+    except MySQLError:
+        traceback.print_exc()
+        return jsonify({"success": False, "message": "Database connection failed."}), 500
+
     profile_image = save_upload("profile_image")
-    password_hash = hash_password(data["password"])
+    password_hash = hash_password(cleaned["password"])
     try:
         query(
             """
@@ -1093,9 +1313,9 @@ def register():
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                data["name"],
-                data["email"],
-                data["phone"],
+                cleaned["name"],
+                email,
+                phone,
                 password_hash,
                 requested_role,
                 data.get("address"),
@@ -1109,8 +1329,17 @@ def register():
             ),
         )
     except MySQLError as error:
-        return db_error_response(error)
-    return jsonify({"message": "User registered successfully"}), 201
+        traceback.print_exc()
+        message = str(error).lower()
+        if "duplicate entry" in message and "email" in message:
+            return jsonify({"success": False, "message": "Email already exists."}), 409
+        if "duplicate entry" in message and "phone" in message:
+            return jsonify({"success": False, "message": "Phone number already exists."}), 409
+        return jsonify({"success": False, "message": "Database connection failed."}), 500
+    except (TypeError, ValueError):
+        traceback.print_exc()
+        return jsonify({"success": False, "message": "Invalid input."}), 400
+    return jsonify({"success": True, "message": "Registration successful."}), 201
 
 
 @app.post("/api/auth/login")
@@ -1311,6 +1540,8 @@ def add_product():
     if single_image:
         images.insert(0, single_image)
     image = images[0] if images else None
+    crop_name = (data.get("crop_name") or "").strip()
+    location = (data.get("location") or "").strip()
     quantity = int(data.get("quantity", 0))
     price = float(data.get("price", 0))
     unit = data.get("unit") or "Kg"
@@ -1318,12 +1549,12 @@ def add_product():
     farmer_id = request.user.get("id")
     if not farmer_id:
         return jsonify({"message": "Unauthorized"}), 401
-    if not data.get("crop_name") or quantity < 0 or price < 0 or not data.get("location"):
+    if not crop_name or quantity < 0 or price < 0 or not location:
         return jsonify({"message": "Crop name, valid stock, price and location are required."}), 400
     app.logger.info(
         "Product insert requested: farmer_id=%s crop=%s quantity=%s price=%s",
         farmer_id,
-        data.get("crop_name"),
+        crop_name,
         quantity,
         price,
     )
@@ -1332,7 +1563,7 @@ def add_product():
         INSERT INTO products (farmer_id, crop_name, category, quantity, price, unit, location, description, image, status)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (farmer_id, data.get("crop_name"), data.get("category"), quantity, price, unit, data.get("location"), data.get("description"), image, status),
+        (farmer_id, crop_name, data.get("category"), quantity, price, unit, location, data.get("description"), image, status),
     )
     product = query("SELECT * FROM products WHERE farmer_id=%s ORDER BY id DESC LIMIT 1", (farmer_id,), fetch=True, one=True)
     for index, image_path in enumerate(images):
@@ -1361,6 +1592,10 @@ def update_product(product_id):
     price = float(data.get("price", product["price"]))
     unit = data.get("unit") or product.get("unit") or "Kg"
     status = data.get("status") or ("Available" if quantity > 0 else "Sold Out")
+    crop_name = (data.get("crop_name", product["crop_name"]) or "").strip()
+    location = (data.get("location", product["location"]) or "").strip()
+    if not crop_name or not location:
+        return jsonify({"message": "Crop name and location are required."}), 400
     images = save_uploads("images")
     single_image = save_upload("image")
     if single_image:
@@ -1373,12 +1608,12 @@ def update_product(product_id):
         WHERE id=%s
         """,
         (
-            data.get("crop_name", product["crop_name"]),
+            crop_name,
             data.get("category", product.get("category")),
             quantity,
             price,
             unit,
-            data.get("location", product["location"]),
+            location,
             data.get("description", product.get("description") or ""),
             primary_image,
             status,
@@ -2524,7 +2759,8 @@ def superadmin_verifications():
 def superadmin_products():
     return jsonify(query(
         """
-        SELECT p.id, p.crop_name, u.name AS farmer_name, p.price, p.quantity, p.status, p.location, p.created_at
+        SELECT p.id, p.crop_name, p.category, u.name AS farmer_name, p.price, p.quantity, p.unit,
+               p.status, p.location, p.is_featured, p.is_hidden, p.organic_badge, p.created_at
         FROM products p
         LEFT JOIN users u ON u.id=p.farmer_id
         ORDER BY p.id DESC
@@ -2795,28 +3031,356 @@ def delete_fake_product(product_id):
 
 
 @app.get("/api/superadmin/system-settings")
-@auth_required("Admin", "SuperAdmin")
+@auth_required("SuperAdmin")
 def get_system_settings():
-    return jsonify(query("SELECT setting_key, setting_value, updated_at FROM system_settings ORDER BY setting_key", fetch=True))
+    return jsonify({
+        "settings": settings_dict(),
+        "rows": query("SELECT setting_key, setting_value, updated_at FROM system_settings ORDER BY setting_key", fetch=True),
+        "banners": query("SELECT * FROM cms_banners ORDER BY sort_order ASC, id DESC", fetch=True),
+        "categories": query("SELECT * FROM crop_categories ORDER BY name ASC", fetch=True),
+        "media": query("SELECT * FROM media_library ORDER BY id DESC LIMIT 200", fetch=True),
+        "organic_certificates": query(
+            """
+            SELECT oc.*, u.name AS farmer_name, p.crop_name
+            FROM organic_certificates oc
+            LEFT JOIN users u ON u.id=oc.farmer_id
+            LEFT JOIN products p ON p.id=oc.product_id
+            ORDER BY oc.id DESC
+            """,
+            fetch=True,
+        ),
+        "ai_modules": query("SELECT * FROM ai_modules ORDER BY module_key", fetch=True),
+    })
 
 
 @app.put("/api/superadmin/system-settings/<setting_key>")
-@auth_required("Admin", "SuperAdmin")
+@auth_required("SuperAdmin")
 def update_system_setting(setting_key):
     data = request_data()
-    query(
-        """
-        INSERT INTO system_settings (setting_key, setting_value)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)
-        """,
-        (setting_key, data.get("value")),
-    )
+    upsert_setting(setting_key, data.get("value"))
+    create_admin_log("cms_setting_update", setting_key)
     return jsonify({"message": "System setting updated"})
 
 
-@app.put("/api/superadmin/ai-modules/<module_key>")
+@app.put("/api/superadmin/cms-settings")
+@auth_required("SuperAdmin")
+def update_cms_settings():
+    data = request_data()
+    values = data.get("settings", data)
+    if isinstance(values, str):
+        try:
+            values = json.loads(values)
+        except json.JSONDecodeError:
+            values = {}
+    if not isinstance(values, dict):
+        return jsonify({"message": "Invalid settings payload."}), 400
+    for key, value in values.items():
+        if key not in {"settings"} and not isinstance(value, (dict, list)):
+            upsert_setting(str(key), value)
+    for field in ["logo", "splash_screen_image", "login_page_banner", "home_page_hero_image"]:
+        uploaded = save_setting_upload(field)
+        if uploaded:
+            upsert_setting(field, uploaded)
+            query(
+                "INSERT INTO media_library (title, file_url, media_type) VALUES (%s, %s, 'image')",
+                (field.replace("_", " ").title(), uploaded),
+            )
+    create_admin_log("cms_settings_bulk_update", "Owner CMS settings updated")
+    return jsonify({"message": "CMS settings updated", "settings": settings_dict()})
+
+
+@app.post("/api/superadmin/banners")
+@auth_required("SuperAdmin")
+def create_banner():
+    data = request_data()
+    title = (data.get("title") or "FarmKart Banner").strip()
+    image_url = save_setting_upload("image") or data.get("image_url")
+    query(
+        """
+        INSERT INTO cms_banners (title, caption, image_url, target_url, is_active, sort_order)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            title,
+            data.get("caption"),
+            image_url,
+            data.get("target_url"),
+            parse_bool_setting(data.get("is_active", "true")),
+            int(data.get("sort_order") or 0),
+        ),
+    )
+    if image_url:
+        query("INSERT INTO media_library (title, file_url, media_type) VALUES (%s, %s, 'image')", (title, image_url))
+    create_admin_log("cms_banner_create", title)
+    return jsonify({"message": "Banner uploaded"}), 201
+
+
+@app.put("/api/superadmin/banners/<int:banner_id>")
+@auth_required("SuperAdmin")
+def update_banner(banner_id):
+    data = request_data()
+    banner = query("SELECT * FROM cms_banners WHERE id=%s", (banner_id,), fetch=True, one=True)
+    if not banner:
+        return jsonify({"message": "Banner not found"}), 404
+    image_url = save_setting_upload("image") or data.get("image_url", banner.get("image_url"))
+    query(
+        """
+        UPDATE cms_banners
+        SET title=%s, caption=%s, image_url=%s, target_url=%s, is_active=%s, sort_order=%s
+        WHERE id=%s
+        """,
+        (
+            data.get("title", banner.get("title")),
+            data.get("caption", banner.get("caption")),
+            image_url,
+            data.get("target_url", banner.get("target_url")),
+            parse_bool_setting(data.get("is_active", banner.get("is_active"))),
+            int(data.get("sort_order", banner.get("sort_order") or 0) or 0),
+            banner_id,
+        ),
+    )
+    create_admin_log("cms_banner_update", str(banner_id))
+    return jsonify({"message": "Banner updated"})
+
+
+@app.put("/api/superadmin/banners/<int:banner_id>/status")
+@auth_required("SuperAdmin")
+def update_banner_status(banner_id):
+    data = request_data()
+    query("UPDATE cms_banners SET is_active=%s WHERE id=%s", (parse_bool_setting(data.get("is_active", True)), banner_id))
+    create_admin_log("cms_banner_status", str(banner_id))
+    return jsonify({"message": "Banner status updated"})
+
+
+@app.delete("/api/superadmin/banners/<int:banner_id>")
+@auth_required("SuperAdmin")
+def delete_banner(banner_id):
+    query("DELETE FROM cms_banners WHERE id=%s", (banner_id,))
+    create_admin_log("cms_banner_delete", str(banner_id))
+    return jsonify({"message": "Banner deleted"})
+
+
+@app.post("/api/superadmin/categories")
+@auth_required("SuperAdmin")
+def create_category():
+    data = request_data()
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"message": "Category name is required."}), 400
+    query(
+        """
+        INSERT INTO crop_categories (name, description, is_enabled)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE description=VALUES(description), is_enabled=VALUES(is_enabled)
+        """,
+        (name, data.get("description"), parse_bool_setting(data.get("is_enabled", True))),
+    )
+    create_admin_log("cms_category_save", name)
+    return jsonify({"message": "Category saved"}), 201
+
+
+@app.put("/api/superadmin/categories/<int:category_id>")
+@auth_required("SuperAdmin")
+def update_category(category_id):
+    data = request_data()
+    category = query("SELECT * FROM crop_categories WHERE id=%s", (category_id,), fetch=True, one=True)
+    if not category:
+        return jsonify({"message": "Category not found"}), 404
+    query(
+        "UPDATE crop_categories SET name=%s, description=%s, is_enabled=%s WHERE id=%s",
+        (
+            data.get("name", category.get("name")),
+            data.get("description", category.get("description")),
+            parse_bool_setting(data.get("is_enabled", category.get("is_enabled"))),
+            category_id,
+        ),
+    )
+    create_admin_log("cms_category_update", str(category_id))
+    return jsonify({"message": "Category updated"})
+
+
+@app.delete("/api/superadmin/categories/<int:category_id>")
+@auth_required("SuperAdmin")
+def delete_category(category_id):
+    query("DELETE FROM crop_categories WHERE id=%s", (category_id,))
+    create_admin_log("cms_category_delete", str(category_id))
+    return jsonify({"message": "Category deleted"})
+
+
+@app.post("/api/superadmin/media")
+@auth_required("SuperAdmin")
+def upload_media():
+    filename = save_upload("file") or save_upload("image")
+    if not filename:
+        return jsonify({"message": "Upload a valid image file."}), 400
+    file_url = f"uploads/{filename}"
+    query(
+        "INSERT INTO media_library (title, file_url, media_type) VALUES (%s, %s, %s)",
+        (request.form.get("title") or filename, file_url, request.form.get("media_type") or "image"),
+    )
+    create_admin_log("cms_media_upload", file_url)
+    return jsonify({"message": "Media uploaded", "file_url": file_url}), 201
+
+
+@app.delete("/api/superadmin/media/<int:media_id>")
+@auth_required("SuperAdmin")
+def delete_media(media_id):
+    query("DELETE FROM media_library WHERE id=%s", (media_id,))
+    create_admin_log("cms_media_delete", str(media_id))
+    return jsonify({"message": "Media deleted"})
+
+
+@app.put("/api/superadmin/products/<int:product_id>")
+@auth_required("SuperAdmin")
+def cms_edit_product(product_id):
+    data = request_data()
+    product = query("SELECT * FROM products WHERE id=%s", (product_id,), fetch=True, one=True)
+    if not product:
+        return jsonify({"message": "Product not found"}), 404
+    fields = {
+        "crop_name": data.get("crop_name", product.get("crop_name")),
+        "category": data.get("category", product.get("category")),
+        "quantity": int(data.get("quantity", product.get("quantity") or 0)),
+        "price": float(data.get("price", product.get("price") or 0)),
+        "unit": data.get("unit", product.get("unit") or "Kg"),
+        "location": data.get("location", product.get("location")),
+        "description": data.get("description", product.get("description")),
+        "status": data.get("status", product.get("status")),
+    }
+    query(
+        """
+        UPDATE products
+        SET crop_name=%s, category=%s, quantity=%s, price=%s, unit=%s, location=%s, description=%s, status=%s
+        WHERE id=%s
+        """,
+        (*fields.values(), product_id),
+    )
+    create_admin_log("cms_product_edit", str(product_id))
+    return jsonify({"message": "Product updated"})
+
+
+@app.put("/api/superadmin/products/<int:product_id>/flags")
+@auth_required("SuperAdmin")
+def update_product_flags(product_id):
+    data = request_data()
+    query(
+        "UPDATE products SET is_featured=%s, is_hidden=%s, organic_badge=%s WHERE id=%s",
+        (
+            parse_bool_setting(data.get("is_featured", False)),
+            parse_bool_setting(data.get("is_hidden", False)),
+            parse_bool_setting(data.get("organic_badge", False)),
+            product_id,
+        ),
+    )
+    create_admin_log("cms_product_flags", str(product_id))
+    return jsonify({"message": "Product flags updated"})
+
+
+@app.delete("/api/admin/products/<int:product_id>")
 @auth_required("Admin", "SuperAdmin")
+def delete_product_admin(product_id):
+    query("DELETE FROM product_images WHERE product_id=%s", (product_id,))
+    query("DELETE FROM products WHERE id=%s", (product_id,))
+    create_admin_log("cms_product_delete", str(product_id))
+    return jsonify({"message": "Product deleted"})
+
+
+@app.put("/api/superadmin/organic/<int:certificate_id>")
+@auth_required("SuperAdmin")
+def update_organic_certificate(certificate_id):
+    data = request_data()
+    status = data.get("status") or "Pending"
+    if status not in ["Pending", "Approved", "Rejected"]:
+        return jsonify({"message": "Invalid certificate status."}), 400
+    query(
+        "UPDATE organic_certificates SET status=%s, organic_badge=%s WHERE id=%s",
+        (status, parse_bool_setting(data.get("organic_badge", status == "Approved")), certificate_id),
+    )
+    certificate = query("SELECT product_id, organic_badge FROM organic_certificates WHERE id=%s", (certificate_id,), fetch=True, one=True)
+    if certificate and certificate.get("product_id"):
+        query("UPDATE products SET organic_badge=%s WHERE id=%s", (certificate.get("organic_badge"), certificate.get("product_id")))
+    create_admin_log("cms_organic_update", str(certificate_id))
+    return jsonify({"message": "Organic certificate updated"})
+
+
+@app.post("/api/superadmin/notifications/broadcast")
+@auth_required("SuperAdmin")
+def send_broadcast_notification():
+    data = request_data()
+    title = data.get("title") or "FarmKart Update"
+    message = data.get("message") or ""
+    role = normalize_role(data.get("role"))
+    if not message:
+        return jsonify({"message": "Notification message is required."}), 400
+    params = ()
+    where = "WHERE account_status='Active'"
+    if role in ["Farmer", "Buyer", "Admin"]:
+        where += " AND role=%s"
+        params = (role,)
+    users = query(f"SELECT id FROM users {where}", params, fetch=True)
+    for user in users:
+        create_notification(user["id"], title, message)
+    create_admin_log("cms_broadcast", f"{title} to {role or 'all'}")
+    return jsonify({"message": "Broadcast notification sent", "count": len(users)})
+
+
+@app.post("/api/superadmin/ai-models/upload")
+@auth_required("SuperAdmin")
+def cms_upload_ai_model():
+    file = request.files.get("file") or request.files.get("model")
+    if not file:
+        return jsonify({"message": "AI model file is required."}), 400
+    filename = f"{int(time.time())}_{secure_filename(file.filename)}"
+    destination = DISEASE_MODEL_DIR / filename
+    file.save(destination)
+    create_admin_log("cms_ai_model_upload", filename)
+    return jsonify({"message": "AI model uploaded", "file": filename}), 201
+
+
+@app.delete("/api/superadmin/ai-models/<filename>")
+@auth_required("SuperAdmin")
+def cms_delete_ai_model(filename):
+    safe_name = secure_filename(filename)
+    target = DISEASE_MODEL_DIR / safe_name
+    if target.exists():
+        target.unlink()
+    create_admin_log("cms_ai_model_delete", safe_name)
+    return jsonify({"message": "AI model deleted"})
+
+
+@app.post("/api/superadmin/ai-models/retrain")
+@auth_required("SuperAdmin")
+def cms_retrain_ai():
+    create_admin_log("cms_ai_retrain", "Retrain requested from owner CMS")
+    return jsonify({"message": "AI retrain request recorded. Training runs when dataset support is available."})
+
+
+@app.post("/api/superadmin/database/backup")
+@auth_required("SuperAdmin")
+def cms_database_backup():
+    backup_name = f"farmkart-backup-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.json"
+    payload = {
+        "created_at": datetime.utcnow().isoformat(),
+        "settings": settings_dict(False),
+        "counts": {
+            "users": query("SELECT COUNT(*) AS value FROM users", fetch=True, one=True)["value"],
+            "products": query("SELECT COUNT(*) AS value FROM products", fetch=True, one=True)["value"],
+            "orders": query("SELECT COUNT(*) AS value FROM orders", fetch=True, one=True)["value"],
+        },
+    }
+    create_admin_log("cms_database_backup", backup_name)
+    return jsonify({"message": "Database backup prepared", "filename": backup_name, "backup": payload})
+
+
+@app.post("/api/superadmin/database/restore")
+@auth_required("SuperAdmin")
+def cms_database_restore():
+    create_admin_log("cms_database_restore", "Restore requested")
+    return jsonify({"message": "Restore request recorded. Upload-safe restore can be connected to your hosting backup policy."})
+
+
+@app.put("/api/superadmin/ai-modules/<module_key>")
+@auth_required("SuperAdmin")
 def update_ai_module(module_key):
     data = request_data()
     name = data.get("name") or module_key.replace("_", " ").title()
@@ -2869,6 +3433,8 @@ def export_reports():
     writer = csv.DictWriter(output, fieldnames=["id", "crop_name", "quantity", "total_price", "status", "payment_status", "buyer_name", "farmer_name", "created_at"])
     writer.writeheader()
     writer.writerows(report_rows)
+    if export_format == "csv":
+        return app.response_class(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=farmkart-report.csv"})
     return app.response_class(output.getvalue(), mimetype="application/vnd.ms-excel", headers={"Content-Disposition": "attachment; filename=farmkart-report.xls"})
 
 

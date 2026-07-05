@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { FaBars, FaSeedling, FaTimes } from "react-icons/fa";
+import useCms, { cmsAsset } from "../hooks/useCms";
 
 const links = [
   ["Home", "/"],
@@ -12,14 +13,19 @@ const links = [
 
 export default function WebsiteNavbar() {
   const [open, setOpen] = useState(false);
+  const { settings } = useCms();
+  const logo = cmsAsset(settings.logo);
+  const appName = settings.application_name || "FarmKart";
   const navClass = ({ isActive }) => `font-extrabold ${isActive ? "text-green-700" : "text-gray-700 hover:text-green-700"}`;
 
   return (
     <header className="sticky top-0 z-30 border-b border-green-100 bg-white/95 backdrop-blur">
       <div className="website-container flex min-h-[72px] items-center justify-between gap-4">
         <Link to="/" className="flex items-center gap-2 text-2xl font-extrabold text-green-800">
-          <span className="grid h-10 w-10 place-items-center rounded-lg bg-green-700 text-white"><FaSeedling /></span>
-          FarmKart
+          <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-lg bg-green-700 text-white">
+            {logo ? <img src={logo} alt={appName} className="h-full w-full object-cover" /> : <FaSeedling />}
+          </span>
+          {appName}
         </Link>
         <nav className="hidden items-center gap-6 md:flex">
           {links.map(([label, to]) => to.includes("#") ? <a key={label} href={to} className="font-extrabold text-gray-700 hover:text-green-700">{label}</a> : <NavLink key={label} to={to} className={navClass}>{label}</NavLink>)}

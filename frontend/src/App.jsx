@@ -153,7 +153,7 @@ function App() {
 
         <Route
           path="/superadmin/settings"
-          element={<RoleBasedRoute roles={["SuperAdmin", "Admin"]} forbidden={<Forbidden />}><SuperAdminSectionPage section="settings" /></RoleBasedRoute>}
+          element={<RoleBasedRoute roles={["SuperAdmin"]} forbidden={<Forbidden />}><SuperAdminSectionPage section="settings" /></RoleBasedRoute>}
         />
 
         <Route
@@ -362,6 +362,7 @@ function App() {
         <Route path="/admin/reports" element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="/admin/analytics" element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="/admin/complaints" element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="/admin/settings" element={<RoleBasedRoute roles={["SuperAdmin"]} forbidden={<Forbidden />}><SuperAdminSectionPage section="settings" /></RoleBasedRoute>} />
       </Routes>
     </BrowserRouter>
   );

@@ -26,6 +26,7 @@ export default function AddProduct() {
   const [images, setImages] = useState([]);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [showCropSuggestions, setShowCropSuggestions] = useState(false);
 
   const preview = useMemo(() => {
     if (images[0]) {
@@ -33,6 +34,14 @@ export default function AddProduct() {
     }
     return assets.tomato;
   }, [images]);
+
+  const cropSuggestions = useMemo(() => {
+    const search = form.crop_name.trim().toLowerCase();
+    if (!search) {
+      return crops;
+    }
+    return crops.filter((crop) => crop.toLowerCase().includes(search));
+  }, [form.crop_name]);
 
   const update = (key, value) => {
     setForm((current) => ({
@@ -60,8 +69,10 @@ export default function AddProduct() {
       return;
     }
 
-    if (!form.crop_name) {
-      setError("Please select crop name.");
+    const cropName = form.crop_name.trim();
+
+    if (!cropName) {
+      setError("Please enter crop name.");
       return;
     }
 
@@ -82,7 +93,7 @@ export default function AddProduct() {
 
     const payload = new FormData();
 
-    payload.append("crop_name", form.crop_name);
+    payload.append("crop_name", cropName);
     payload.append("category", form.category);
     payload.append("quantity", form.quantity);
     payload.append("price", form.price);
@@ -172,17 +183,38 @@ export default function AddProduct() {
 
           <label className="block text-sm font-bold">
             Crop Name
-            <select
-              className="field mt-2"
-              value={form.crop_name}
-              onChange={(event) => update("crop_name", event.target.value)}
-            >
-              {crops.map((crop) => (
-                <option key={crop} value={crop}>
-                  {crop}
-                </option>
-              ))}
-            </select>
+            <div className="relative mt-2">
+              <input
+                className="field"
+                value={form.crop_name}
+                onChange={(event) => {
+                  update("crop_name", event.target.value);
+                  setShowCropSuggestions(true);
+                }}
+                onFocus={() => setShowCropSuggestions(true)}
+                onBlur={() => setShowCropSuggestions(false)}
+                placeholder="Select or type crop name"
+                autoComplete="off"
+              />
+              {showCropSuggestions && cropSuggestions.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                  {cropSuggestions.map((crop) => (
+                    <button
+                      key={crop}
+                      type="button"
+                      className="block w-full px-3 py-2 text-left text-sm font-bold text-gray-700 hover:bg-green-50"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        update("crop_name", crop);
+                        setShowCropSuggestions(false);
+                      }}
+                    >
+                      {crop}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </label>
 
           <label className="block text-sm font-bold">

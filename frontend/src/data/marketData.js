@@ -14,7 +14,28 @@ export const assets = {
   leaf: "https://images.unsplash.com/photo-1615485290382-441e4d049cb5?auto=format&fit=crop&w=900&q=80",
 };
 
-export const crops = ["Tomato", "Onion", "Potato", "Chilli", "Paddy", "Mango", "Maize", "Cotton"];
+export const crops = [
+  "Tomato",
+  "Onion",
+  "Potato",
+  "Chilli",
+  "Paddy",
+  "Mango",
+  "Maize",
+  "Cotton",
+  "Brinjal",
+  "Banana",
+  "Groundnut",
+  "Red Gram",
+  "Green Gram",
+  "Turmeric",
+  "Mirchi",
+  "Rice",
+  "Wheat",
+  "Sugarcane",
+  "Cabbage",
+  "Cauliflower",
+];
 
 export const categories = [
   { label: "Vegetables", icon: "leaf" },

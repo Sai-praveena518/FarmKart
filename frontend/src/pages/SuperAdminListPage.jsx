@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FaCheck, FaEye, FaPause, FaPlay, FaRupeeSign, FaShieldAlt, FaTimes, FaTrash } from "react-icons/fa";
+import { FaCheck, FaEdit, FaEye, FaPause, FaPlay, FaRupeeSign, FaShieldAlt, FaStar, FaTimes, FaTrash } from "react-icons/fa";
 import api from "../services/api";
 import Loading from "../components/Loading";
 import Forbidden from "./Forbidden";
@@ -40,8 +40,8 @@ const configs = {
   products: {
     title: "Products",
     endpoint: "/api/superadmin/products",
-    columns: ["crop_name", "farmer_name", "price", "quantity", "status", "location", "created_at"],
-    actions: ["approveProduct", "rejectProduct", "deleteProduct"],
+    columns: ["crop_name", "category", "farmer_name", "price", "quantity", "status", "is_featured", "is_hidden", "organic_badge", "location", "created_at"],
+    actions: ["approveProduct", "rejectProduct", "featureProduct", "hideProduct", "editProduct", "deleteProduct"],
   },
   orders: {
     title: "Orders",
@@ -107,6 +107,9 @@ const labels = {
   products_count: "Products",
   orders_count: "Orders",
   total_orders: "Orders",
+  is_featured: "Featured",
+  is_hidden: "Hidden",
+  organic_badge: "Organic",
   joined_members: "Members",
   payment_method: "Method",
   payment_status: "Payment",
@@ -119,6 +122,7 @@ const labels = {
 function formatValue(value, key) {
   if (value === null || value === undefined || value === "") return "-";
   if (key === "verified_status") return value ? "Verified" : "Pending";
+  if (["is_featured", "is_hidden", "organic_badge"].includes(key)) return value ? "Yes" : "No";
   if (Array.isArray(value)) return `${value.length} member${value.length === 1 ? "" : "s"}`;
   return String(value);
 }
@@ -201,6 +205,27 @@ export default function SuperAdminListPage({ section }) {
     await call(() => api.post("/api/superadmin/admins", { name, email, password }), "Admin created.");
   };
 
+  const editProduct = async (row) => {
+    const cropName = window.prompt("Crop name", row.crop_name || "");
+    if (!cropName) return;
+    const price = window.prompt("Price", row.price || "");
+    if (!price) return;
+    const quantity = window.prompt("Quantity", row.quantity || "");
+    if (!quantity) return;
+    await call(
+      () => api.put(`/api/superadmin/products/${row.id}`, {
+        crop_name: cropName,
+        category: row.category,
+        price,
+        quantity,
+        unit: row.unit,
+        location: row.location,
+        status: row.status,
+      }),
+      "Product updated."
+    );
+  };
+
   const withActions = useMemo(() => {
     if (section === "ai-usage") return [];
     const searchText = search.trim().toLowerCase();
@@ -220,7 +245,10 @@ export default function SuperAdminListPage({ section }) {
       if (config.actions.includes("reject")) actions.push(actionButton("Reject", FaTimes, () => call(() => api.put(`/api/admin/users/${row.id}/verify`, { is_verified: false }), "Verification rejected."), "red"));
       if (config.actions.includes("approveProduct")) actions.push(actionButton("Approve", FaCheck, () => call(() => api.put(`/api/admin/products/${row.id}/status`, { status: "Available" }), "Product approved."), "green"));
       if (config.actions.includes("rejectProduct")) actions.push(actionButton("Reject", FaTimes, () => call(() => api.put(`/api/admin/products/${row.id}/status`, { status: "Rejected" }), "Product rejected."), "red"));
-      if (config.actions.includes("deleteProduct")) actions.push(actionButton("Delete", FaTrash, () => call(() => api.delete(`/api/admin/products/${row.id}/fake`), "Product deleted."), "red"));
+      if (config.actions.includes("featureProduct")) actions.push(actionButton(row.is_featured ? "Unfeature" : "Feature", FaStar, () => call(() => api.put(`/api/superadmin/products/${row.id}/flags`, { is_featured: !row.is_featured, is_hidden: row.is_hidden, organic_badge: row.organic_badge }), "Product feature updated."), "green"));
+      if (config.actions.includes("hideProduct")) actions.push(actionButton(row.is_hidden ? "Show" : "Hide", row.is_hidden ? FaPlay : FaPause, () => call(() => api.put(`/api/superadmin/products/${row.id}/flags`, { is_featured: row.is_featured, is_hidden: !row.is_hidden, organic_badge: row.organic_badge }), "Product visibility updated.")));
+      if (config.actions.includes("editProduct")) actions.push(actionButton("Edit", FaEdit, () => editProduct(row)));
+      if (config.actions.includes("deleteProduct")) actions.push(actionButton("Delete", FaTrash, () => call(() => api.delete(`/api/admin/products/${row.id}`), "Product deleted."), "red"));
       if (config.actions.includes("toggleStatus")) {
         const suspended = row.status === "Suspended";
         actions.push(actionButton(suspended ? "Activate" : "Suspend", suspended ? FaPlay : FaPause, () => call(() => api.put(`/api/superadmin/users/${row.id}/status`, { account_status: suspended ? "Active" : "Suspended" }), "Status updated."), suspended ? "green" : "red"));

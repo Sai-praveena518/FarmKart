@@ -8,6 +8,7 @@ import WebsiteNavbar from "../components/WebsiteNavbar";
 import WebsiteFooter from "../components/WebsiteFooter";
 import StatCard from "../components/StatCard";
 import { clearSession } from "../utils/auth";
+import useCms, { cmsAsset } from "../hooks/useCms";
 
 const features = [
   ["Direct Farmer to Buyer Market", FaHandshake],
@@ -24,6 +25,9 @@ const features = [
 
 export default function Home() {
   const [stats, setStats] = useState({ farmers: 0, buyers: 0, products: 0, orders: 0 });
+  const { settings, banners } = useCms();
+  const heroImage = cmsAsset(settings.home_page_hero_image) || assets.farmKartHero;
+  const activeBanner = banners[0];
 
   useEffect(() => {
     clearSession();
@@ -37,15 +41,22 @@ export default function Home() {
         <section className="farm-hero website-container grid min-h-[calc(100vh-92px)] items-center gap-12 pb-28 pt-10 md:grid-cols-[0.9fr_1fr]">
           <div className="farm-hero-copy">
             <img className="farm-logo-lockup" src={farmKartLogoLockup} alt="FarmKart - Your Farm. Your Market." />
-            <p className="farm-hero-text">FarmKart connects farmers directly with buyers using smart technology, real-time orders, transport sharing, and AI-powered farming tools.</p>
+            <p className="font-extrabold text-green-700">{settings.home_page_caption}</p>
+            <p className="farm-hero-text">{settings.home_page_description}</p>
             <div className="farm-hero-actions">
               <Link to="/register" className="farm-hero-primary">Get Started <FaArrowRight /></Link>
               <Link to="/products" className="farm-hero-secondary">View Products</Link>
             </div>
+            {activeBanner && (
+              <a href={activeBanner.target_url || "#features"} className="mt-5 block rounded-lg border border-green-100 bg-white/90 p-3 text-sm font-bold text-green-800 shadow-sm">
+                {activeBanner.title}
+                {activeBanner.caption && <span className="mt-1 block text-xs text-gray-600">{activeBanner.caption}</span>}
+              </a>
+            )}
           </div>
           <div className="farm-hero-photo">
             <div>
-              <img src={assets.farmKartHero} alt="FarmKart farmer" />
+              <img src={heroImage} alt="FarmKart farmer" />
             </div>
           </div>
         </section>
