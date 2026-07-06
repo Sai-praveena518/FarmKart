@@ -3647,10 +3647,39 @@ def create_superadmin_from_command():
     return True
 
 
+def seed_superadmin_from_env():
+    email = (os.getenv("SUPERADMIN_EMAIL") or "").strip().lower()
+    password = os.getenv("SUPERADMIN_PASSWORD") or ""
+    name = (os.getenv("SUPERADMIN_NAME") or "").strip()
+
+    if not email or not password or not name:
+        return
+
+    existing = query(
+        "SELECT id FROM users WHERE LOWER(email)=LOWER(%s) LIMIT 1",
+        (email,),
+        fetch=True,
+        one=True,
+    )
+    if existing:
+        print("SuperAdmin seed skipped: user already exists.")
+        return
+
+    query(
+        """
+        INSERT INTO users (name, email, password_hash, role, is_verified, account_status)
+        VALUES (%s, %s, %s, 'SuperAdmin', TRUE, 'Active')
+        """,
+        (name, email, hash_password(password)),
+    )
+    print("SuperAdmin seed user created.")
+
+
 def initialize_database_on_startup():
     try:
         with app.app_context():
             init_database()
+            seed_superadmin_from_env()
             print("Database initialized successfully")
     except Exception as e:
         print("Database initialization failed")
