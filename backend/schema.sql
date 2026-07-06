@@ -231,6 +231,23 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS ai_predictions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT,
+  prediction_type VARCHAR(80),
+  crop_name VARCHAR(120),
+  result TEXT,
+  confidence DECIMAL(5,2),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS analytics (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  metric_key VARCHAR(120) NOT NULL,
+  metric_value DECIMAL(12,2) DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 ALTER TABLE price_predictions
   ADD COLUMN IF NOT EXISTS farmer_id INT,
   ADD COLUMN IF NOT EXISTS market VARCHAR(150),

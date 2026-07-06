@@ -839,6 +839,25 @@ def init_database():
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS ai_predictions (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT,
+          prediction_type VARCHAR(80),
+          crop_name VARCHAR(120),
+          result TEXT,
+          confidence DECIMAL(5,2),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS analytics (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          metric_key VARCHAR(120) NOT NULL,
+          metric_value DECIMAL(12,2) DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
     ]
     connection = mysql.connector.connect(**db_config())
     cursor = connection.cursor()
@@ -988,25 +1007,6 @@ def db_error_response(error):
     if "Unknown column" in message or "doesn't exist" in message:
         return jsonify({"message": "Database tables are not updated. Run backend/schema.sql in MySQL, then try again.", "details": message}), 500
     return jsonify({"message": "Database error during registration.", "details": message}), 500
-
-
-def is_schema_error(error):
-    message = str(error).lower()
-    return "unknown column" in message or "doesn't exist" in message or "does not exist" in message
-
-
-def admin_dashboard_error_response(error, retry_attempted=False):
-    print("Admin dashboard load failed")
-    traceback.print_exc()
-    message = str(error)
-    if isinstance(error, MySQLError):
-        if is_schema_error(error):
-            hint = "Database schema is not ready for admin dashboard. Startup migrations were attempted."
-            if retry_attempted:
-                hint = "Database schema is still not ready after retrying startup migrations."
-            return jsonify({"message": hint, "details": message}), 500
-        return jsonify({"message": "Database error while loading admin dashboard.", "details": message}), 500
-    return jsonify({"message": "Unexpected error while loading admin dashboard.", "details": message}), 500
 
 
 def allowed_file(filename):
@@ -2518,25 +2518,104 @@ def admin_stats():
     })
 
 
+def safe_query(sql, params=None, fetch=False, one=False, default=None, context="admin dashboard query"):
+    try:
+        result = query(sql, params or (), fetch=fetch, one=one)
+        if result is None:
+            return default
+        return result
+    except Exception as e:
+        print(f"{context} failed: {e}")
+        traceback.print_exc()
+        return default
+
+
+def safe_count(table_name):
+    try:
+        result = query(f"SELECT COUNT(*) AS total FROM {table_name}", fetch=True, one=True)
+        return result["total"] if result else 0
+    except Exception:
+        print(f"safe_count failed for {table_name}")
+        traceback.print_exc()
+        return 0
+
+
+def safe_count_where(table_name, where_clause, params=None):
+    result = safe_query(
+        f"SELECT COUNT(*) AS total FROM {table_name} WHERE {where_clause}",
+        params or (),
+        fetch=True,
+        one=True,
+        default={"total": 0},
+        context=f"admin dashboard count {table_name}",
+    )
+    return result["total"] if result else 0
+
+
+def safe_sum(sql, params=None):
+    result = safe_query(
+        sql,
+        params or (),
+        fetch=True,
+        one=True,
+        default={"value": 0},
+        context="admin dashboard sum",
+    )
+    return result["value"] if result else 0
+
+
+def safe_count_users_by_role(role, extra_condition=""):
+    clause, values = role_in_clause("role", [role])
+    return safe_count_where("users", f"{clause}{extra_condition}", values)
+
+
 def admin_dashboard_payload():
-    revenue_data = revenue_summary(request.user)
     farmer_clause, farmer_values = role_in_clause("role", ["Farmer"])
     buyer_clause, buyer_values = role_in_clause("role", ["Buyer"])
-    total_predictions = query("SELECT COUNT(*) AS value FROM price_predictions", fetch=True, one=True)["value"]
-    total_disease_requests = query("SELECT COUNT(*) AS value FROM disease_history", fetch=True, one=True)["value"]
-    pending_orders = query("SELECT COUNT(*) AS value FROM orders WHERE status='Pending'", fetch=True, one=True)["value"]
-    approved_orders = query("SELECT COUNT(*) AS value FROM orders WHERE status IN ('Accepted', 'Delivered')", fetch=True, one=True)["value"]
-    rejected_orders = query("SELECT COUNT(*) AS value FROM orders WHERE status IN ('Rejected', 'Cancelled')", fetch=True, one=True)["value"]
-    transport_requests = query("SELECT COUNT(*) AS value FROM transport_requests", fetch=True, one=True)["value"]
-    complaints = query("SELECT COUNT(*) AS value FROM complaints WHERE status <> 'Closed'", fetch=True, one=True)["value"]
-    verified_farmers = count_users_by_role("Farmer", extra_condition=" AND is_verified=TRUE")
-    verified_buyers = count_users_by_role("Buyer", extra_condition=" AND is_verified=TRUE")
-    pending_farmers = count_users_by_role("Farmer", extra_condition=" AND is_verified=FALSE")
-    pending_buyers = count_users_by_role("Buyer", extra_condition=" AND is_verified=FALSE")
-    pending_products = query("SELECT COUNT(*) AS value FROM products WHERE status='Pending'", fetch=True, one=True)["value"]
-    payments = query("SELECT COUNT(*) AS value FROM payments", fetch=True, one=True)["value"]
-    daily_active_users = query("SELECT COUNT(*) AS value FROM users WHERE last_login_at >= NOW() - INTERVAL 1 DAY", fetch=True, one=True)["value"]
-    popular_crops = query(
+    total_predictions = safe_count("price_predictions")
+    ai_predictions = safe_count("ai_predictions")
+    analytics = safe_count("analytics")
+    total_disease_requests = safe_count("disease_history")
+    weather_requests = safe_count("weather_logs")
+    pending_orders = safe_count_where("orders", "status='Pending'")
+    approved_orders = safe_count_where("orders", "status IN ('Accepted', 'Delivered')")
+    rejected_orders = safe_count_where("orders", "status IN ('Rejected', 'Cancelled')")
+    transport_requests = safe_count("transport_requests")
+    complaints = safe_count_where("complaints", "status <> 'Closed'")
+    verified_farmers = safe_count_users_by_role("Farmer", " AND is_verified=TRUE")
+    verified_buyers = safe_count_users_by_role("Buyer", " AND is_verified=TRUE")
+    pending_farmers = safe_count_users_by_role("Farmer", " AND is_verified=FALSE")
+    pending_buyers = safe_count_users_by_role("Buyer", " AND is_verified=FALSE")
+    pending_products = safe_count_where("products", "status='Pending'")
+    payments = safe_count("payments")
+    daily_active_users = safe_count_where("users", "last_login_at >= NOW() - INTERVAL 1 DAY")
+    actual_revenue = safe_sum("SELECT COALESCE(SUM(amount), 0) AS value FROM payments WHERE payment_status='Paid'")
+    estimated_revenue = safe_sum(
+        """
+        SELECT COALESCE(SUM(total_price), 0) AS value
+        FROM orders
+        WHERE status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status <> 'Paid'
+        """
+    )
+    pending_payments = safe_sum(
+        """
+        SELECT COALESCE(SUM(total_price), 0) AS value
+        FROM orders
+        WHERE status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status='Pending'
+        """
+    )
+    total_orders = safe_count("orders")
+    revenue_data = {
+        "actual_revenue": actual_revenue,
+        "estimated_revenue": estimated_revenue,
+        "pending_payments": pending_payments,
+        "total_orders": total_orders,
+        "accepted_orders": safe_count_where("orders", "status='Accepted'"),
+        "delivered_orders": safe_count_where("orders", "status='Delivered'"),
+        "cancelled_orders": safe_count_where("orders", "status IN ('Cancelled', 'Rejected')"),
+        "paid_orders": safe_count_where("orders", "payment_status='Paid'"),
+    }
+    popular_crops = safe_query(
         """
         SELECT crop_name, COUNT(*) AS value
         FROM products
@@ -2545,8 +2624,10 @@ def admin_dashboard_payload():
         LIMIT 5
         """,
         fetch=True,
+        default=[],
+        context="admin dashboard popular crops",
     )
-    most_predicted_crops = query(
+    most_predicted_crops = safe_query(
         """
         SELECT crop_name, COUNT(*) AS value
         FROM price_predictions
@@ -2555,8 +2636,10 @@ def admin_dashboard_payload():
         LIMIT 5
         """,
         fetch=True,
+        default=[],
+        context="admin dashboard predicted crops",
     )
-    disease_crop_checks = query(
+    disease_crop_checks = safe_query(
         """
         SELECT COALESCE(crop_name, 'Unknown') AS crop_name, COUNT(*) AS value
         FROM disease_history
@@ -2565,8 +2648,10 @@ def admin_dashboard_payload():
         LIMIT 5
         """,
         fetch=True,
+        default=[],
+        context="admin dashboard disease crops",
     )
-    top_farmers = query(
+    top_farmers = safe_query(
         f"""
         SELECT u.name, COALESCE(SUM(o.total_price), 0) AS value
         FROM users u
@@ -2578,8 +2663,10 @@ def admin_dashboard_payload():
         """,
         farmer_values,
         fetch=True,
+        default=[],
+        context="admin dashboard top farmers",
     )
-    top_buyers = query(
+    top_buyers = safe_query(
         f"""
         SELECT u.name, COUNT(o.id) AS value
         FROM users u
@@ -2591,12 +2678,16 @@ def admin_dashboard_payload():
         """,
         buyer_values,
         fetch=True,
+        default=[],
+        context="admin dashboard top buyers",
     )
-    recent_registrations = query(
-        "SELECT id, name, role, village, district, created_at FROM users ORDER BY id DESC LIMIT 5",
+    recent_users = safe_query(
+        "SELECT id, name, email, role, village, district, created_at FROM users ORDER BY id DESC LIMIT 5",
         fetch=True,
+        default=[],
+        context="admin dashboard recent users",
     )
-    recent_orders = query(
+    recent_orders = safe_query(
         """
         SELECT o.*, buyer.name AS buyer_name, farmer.name AS farmer_name
         FROM orders o
@@ -2606,6 +2697,32 @@ def admin_dashboard_payload():
         LIMIT 5
         """,
         fetch=True,
+        default=[],
+        context="admin dashboard recent orders",
+    )
+    recent_products = safe_query(
+        """
+        SELECT p.id, p.crop_name, p.quantity, p.price, p.status, p.created_at, u.name AS farmer_name
+        FROM products p
+        LEFT JOIN users u ON u.id=p.farmer_id
+        ORDER BY p.id DESC
+        LIMIT 5
+        """,
+        fetch=True,
+        default=[],
+        context="admin dashboard recent products",
+    )
+    activity_logs = safe_query(
+        """
+        SELECT al.id, al.action, al.details, al.created_at, u.name AS user_name
+        FROM activity_logs al
+        LEFT JOIN users u ON u.id=al.user_id
+        ORDER BY al.id DESC
+        LIMIT 10
+        """,
+        fetch=True,
+        default=[],
+        context="admin dashboard activity logs",
     )
     revenue = (revenue_data.get("actual_revenue") or 0) + (revenue_data.get("estimated_revenue") or 0)
     pending_verifications = pending_farmers + pending_buyers
@@ -2613,21 +2730,31 @@ def admin_dashboard_payload():
         **revenue_data,
         "revenue": revenue,
         "total_revenue": revenue,
-        "total_users": query("SELECT COUNT(*) AS value FROM users", fetch=True, one=True)["value"],
-        "total_farmers": count_users_by_role("Farmer"),
+        "total_users": safe_count("users"),
+        "total_farmers": safe_count_users_by_role("Farmer"),
+        "farmers": safe_count_users_by_role("Farmer"),
         "verified_farmers": verified_farmers,
         "verified_buyers": verified_buyers,
         "pending_farmers": pending_farmers,
         "pending_buyers": pending_buyers,
         "pending_verification": pending_verifications,
         "pending_verifications": pending_verifications,
-        "total_buyers": count_users_by_role("Buyer"),
-        "total_admins": count_users_by_role("Admin"),
-        "total_products": query("SELECT COUNT(*) AS value FROM products", fetch=True, one=True)["value"],
+        "total_buyers": safe_count_users_by_role("Buyer"),
+        "buyers": safe_count_users_by_role("Buyer"),
+        "total_admins": safe_count_users_by_role("Admin"),
+        "total_products": safe_count("products"),
+        "products": safe_count("products"),
         "pending_products": pending_products,
-        "total_orders": query("SELECT COUNT(*) AS value FROM orders", fetch=True, one=True)["value"],
+        "total_orders": total_orders,
+        "orders": total_orders,
         "payments": payments,
         "complaints": complaints,
+        "transport_requests": transport_requests,
+        "weather_requests": weather_requests,
+        "disease_detection_requests": total_disease_requests,
+        "price_predictions": total_predictions,
+        "ai_predictions": ai_predictions,
+        "analytics": analytics,
         "ai_usage": total_predictions + total_disease_requests,
         "daily_active_users": daily_active_users,
         "total_ai_price_predictions": total_predictions,
@@ -2636,43 +2763,30 @@ def admin_dashboard_payload():
         "approved_orders": approved_orders,
         "completed_orders": approved_orders,
         "rejected_orders": rejected_orders,
-        "transport_requests": transport_requests,
         "popular_crops": popular_crops,
         "most_predicted_crops": most_predicted_crops,
         "most_requested_crop_disease_checks": disease_crop_checks,
         "top_farmers": top_farmers,
         "top_buyers": top_buyers,
-        "recent_registrations": recent_registrations,
+        "recent_users": recent_users,
+        "recent_registrations": recent_users,
         "recent_orders": recent_orders,
+        "recent_products": recent_products,
+        "activity_logs": activity_logs,
     }
-
-
-def admin_dashboard_response():
-    try:
-        return jsonify(admin_dashboard_payload())
-    except MySQLError as error:
-        if is_schema_error(error):
-            try:
-                init_database()
-                return jsonify(admin_dashboard_payload())
-            except Exception as retry_error:
-                return admin_dashboard_error_response(retry_error, retry_attempted=True)
-        return admin_dashboard_error_response(error)
-    except Exception as error:
-        return admin_dashboard_error_response(error)
 
 
 @app.get("/api/admin/dashboard")
 @app.get("/admin/dashboard")
 @auth_required("Admin", "SuperAdmin")
 def admin_dashboard():
-    return admin_dashboard_response()
+    return jsonify(admin_dashboard_payload())
 
 
 @app.get("/api/admin/analytics")
 @auth_required("Admin", "SuperAdmin")
 def admin_analytics():
-    return admin_dashboard_response()
+    return jsonify(admin_dashboard_payload())
 
 
 def platform_charts():
