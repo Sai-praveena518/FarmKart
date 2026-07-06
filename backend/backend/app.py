@@ -2523,7 +2523,7 @@ def admin_stats():
     })
 
 
-def dashboard_table_exists(table_name):
+def table_exists(table_name):
     try:
         return bool(query("SHOW TABLES LIKE %s", (table_name,), fetch=True, one=True))
     except Exception as e:
@@ -2532,67 +2532,53 @@ def dashboard_table_exists(table_name):
         return False
 
 
-def dashboard_tables_exist(table_names):
-    return all(dashboard_table_exists(table_name) for table_name in table_names)
-
-
-def safe_query(sql, params=None, fetch=False, one=False, default=None, context="admin dashboard query", required_tables=None):
-    if required_tables and not dashboard_tables_exist(required_tables):
-        print(f"{context} skipped: missing table in {', '.join(required_tables)}")
-        return default
+def safe_query(sql, params=(), default=None):
     try:
-        result = query(sql, params or (), fetch=fetch, one=one)
+        result = query(sql, params or (), fetch=True)
         if result is None:
             return default
         return result
     except Exception as e:
-        print(f"{context} failed: {e}")
+        print(f"admin dashboard query failed: {e}")
         traceback.print_exc()
         return default
 
 
-def safe_count(table_name):
-    if not dashboard_table_exists(table_name):
+def safe_count(table_name, where_clause="", params=()):
+    if not table_exists(table_name):
         print(f"safe_count skipped: missing table {table_name}")
         return 0
     try:
-        result = query(f"SELECT COUNT(*) AS total FROM {table_name}", fetch=True, one=True)
+        sql = f"SELECT COUNT(*) AS total FROM {table_name}"
+        if where_clause:
+            sql += f" WHERE {where_clause}"
+        result = query(sql, params or (), fetch=True, one=True)
         return result["total"] if result else 0
-    except Exception:
-        print(f"safe_count failed for {table_name}")
+    except Exception as e:
+        print(f"safe_count failed for {table_name}: {e}")
         traceback.print_exc()
         return 0
 
 
-def safe_count_where(table_name, where_clause, params=None):
-    result = safe_query(
-        f"SELECT COUNT(*) AS total FROM {table_name} WHERE {where_clause}",
-        params or (),
-        fetch=True,
-        one=True,
-        default={"total": 0},
-        context=f"admin dashboard count {table_name}",
-        required_tables=(table_name,),
-    )
-    return result["total"] if result else 0
-
-
-def safe_sum(sql, params=None, required_tables=None):
-    result = safe_query(
-        sql,
-        params or (),
-        fetch=True,
-        one=True,
-        default={"value": 0},
-        context="admin dashboard sum",
-        required_tables=required_tables,
-    )
-    return result["value"] if result else 0
+def safe_sum(table_name, column, where_clause="", params=()):
+    if not table_exists(table_name):
+        print(f"safe_sum skipped: missing table {table_name}")
+        return 0
+    try:
+        sql = f"SELECT COALESCE(SUM({column}), 0) AS total FROM {table_name}"
+        if where_clause:
+            sql += f" WHERE {where_clause}"
+        result = query(sql, params or (), fetch=True, one=True)
+        return result["total"] if result else 0
+    except Exception as e:
+        print(f"safe_sum failed for {table_name}.{column}: {e}")
+        traceback.print_exc()
+        return 0
 
 
 def safe_count_users_by_role(role, extra_condition=""):
     clause, values = role_in_clause("role", [role])
-    return safe_count_where("users", f"{clause}{extra_condition}", values)
+    return safe_count("users", f"{clause}{extra_condition}", values)
 
 
 def admin_dashboard_fallback_payload():
@@ -2665,48 +2651,31 @@ def admin_dashboard_payload():
     analytics = safe_count("analytics")
     total_disease_requests = safe_count("disease_history")
     weather_requests = safe_count("weather_logs")
-    pending_orders = safe_count_where("orders", "status='Pending'")
-    approved_orders = safe_count_where("orders", "status IN ('Accepted', 'Delivered')")
-    rejected_orders = safe_count_where("orders", "status IN ('Rejected', 'Cancelled')")
+    pending_orders = safe_count("orders", "status='Pending'")
+    approved_orders = safe_count("orders", "status IN ('Accepted', 'Delivered')")
+    rejected_orders = safe_count("orders", "status IN ('Rejected', 'Cancelled')")
     transport_requests = safe_count("transport_requests")
-    complaints = safe_count_where("complaints", "status <> 'Closed'")
+    complaints = safe_count("complaints", "status <> 'Closed'")
     verified_farmers = safe_count_users_by_role("Farmer", " AND is_verified=TRUE")
     verified_buyers = safe_count_users_by_role("Buyer", " AND is_verified=TRUE")
     pending_farmers = safe_count_users_by_role("Farmer", " AND is_verified=FALSE")
     pending_buyers = safe_count_users_by_role("Buyer", " AND is_verified=FALSE")
-    pending_products = safe_count_where("products", "status='Pending'")
+    pending_products = safe_count("products", "status='Pending'")
     payments = safe_count("payments")
-    daily_active_users = safe_count_where("users", "last_login_at >= NOW() - INTERVAL 1 DAY")
-    actual_revenue = safe_sum(
-        "SELECT COALESCE(SUM(amount), 0) AS value FROM payments WHERE payment_status='Paid'",
-        required_tables=("payments",),
-    )
-    estimated_revenue = safe_sum(
-        """
-        SELECT COALESCE(SUM(total_price), 0) AS value
-        FROM orders
-        WHERE status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status <> 'Paid'
-        """,
-        required_tables=("orders",),
-    )
-    pending_payments = safe_sum(
-        """
-        SELECT COALESCE(SUM(total_price), 0) AS value
-        FROM orders
-        WHERE status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status='Pending'
-        """,
-        required_tables=("orders",),
-    )
+    daily_active_users = safe_count("users", "last_login_at >= NOW() - INTERVAL 1 DAY")
+    actual_revenue = safe_sum("payments", "amount", "payment_status='Paid'")
+    estimated_revenue = safe_sum("orders", "total_price", "status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status <> 'Paid'")
+    pending_payments = safe_sum("orders", "total_price", "status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status='Pending'")
     total_orders = safe_count("orders")
     revenue_data = {
         "actual_revenue": actual_revenue,
         "estimated_revenue": estimated_revenue,
         "pending_payments": pending_payments,
         "total_orders": total_orders,
-        "accepted_orders": safe_count_where("orders", "status='Accepted'"),
-        "delivered_orders": safe_count_where("orders", "status='Delivered'"),
-        "cancelled_orders": safe_count_where("orders", "status IN ('Cancelled', 'Rejected')"),
-        "paid_orders": safe_count_where("orders", "payment_status='Paid'"),
+        "accepted_orders": safe_count("orders", "status='Accepted'"),
+        "delivered_orders": safe_count("orders", "status='Delivered'"),
+        "cancelled_orders": safe_count("orders", "status IN ('Cancelled', 'Rejected')"),
+        "paid_orders": safe_count("orders", "payment_status='Paid'"),
     }
     popular_crops = safe_query(
         """
@@ -2716,11 +2685,8 @@ def admin_dashboard_payload():
         ORDER BY value DESC
         LIMIT 5
         """,
-        fetch=True,
         default=[],
-        context="admin dashboard popular crops",
-        required_tables=("products",),
-    )
+    ) if table_exists("products") else []
     most_predicted_crops = safe_query(
         """
         SELECT crop_name, COUNT(*) AS value
@@ -2729,11 +2695,8 @@ def admin_dashboard_payload():
         ORDER BY value DESC
         LIMIT 5
         """,
-        fetch=True,
         default=[],
-        context="admin dashboard predicted crops",
-        required_tables=("price_predictions",),
-    )
+    ) if table_exists("price_predictions") else []
     disease_crop_checks = safe_query(
         """
         SELECT COALESCE(crop_name, 'Unknown') AS crop_name, COUNT(*) AS value
@@ -2742,11 +2705,8 @@ def admin_dashboard_payload():
         ORDER BY value DESC
         LIMIT 5
         """,
-        fetch=True,
         default=[],
-        context="admin dashboard disease crops",
-        required_tables=("disease_history",),
-    )
+    ) if table_exists("disease_history") else []
     top_farmers = safe_query(
         f"""
         SELECT u.name, COALESCE(SUM(o.total_price), 0) AS value
@@ -2758,11 +2718,8 @@ def admin_dashboard_payload():
         LIMIT 5
         """,
         farmer_values,
-        fetch=True,
         default=[],
-        context="admin dashboard top farmers",
-        required_tables=("users", "orders"),
-    )
+    ) if table_exists("users") and table_exists("orders") else []
     top_buyers = safe_query(
         f"""
         SELECT u.name, COUNT(o.id) AS value
@@ -2774,34 +2731,22 @@ def admin_dashboard_payload():
         LIMIT 5
         """,
         buyer_values,
-        fetch=True,
         default=[],
-        context="admin dashboard top buyers",
-        required_tables=("users", "orders"),
-    )
+    ) if table_exists("users") and table_exists("orders") else []
     recent_users = safe_query(
         "SELECT id, name, email, role, village, district, created_at FROM users ORDER BY id DESC LIMIT 5",
-        fetch=True,
         default=[],
-        context="admin dashboard recent users",
-        required_tables=("users",),
-    )
+    ) if table_exists("users") else []
     recent_farmers = safe_query(
         f"SELECT id, name, email, role, village, district, created_at FROM users WHERE {farmer_clause} ORDER BY id DESC LIMIT 5",
         farmer_values,
-        fetch=True,
         default=[],
-        context="admin dashboard recent farmers",
-        required_tables=("users",),
-    )
+    ) if table_exists("users") else []
     recent_buyers = safe_query(
         f"SELECT id, name, email, role, village, district, created_at FROM users WHERE {buyer_clause} ORDER BY id DESC LIMIT 5",
         buyer_values,
-        fetch=True,
         default=[],
-        context="admin dashboard recent buyers",
-        required_tables=("users",),
-    )
+    ) if table_exists("users") else []
     recent_orders = safe_query(
         """
         SELECT o.*, buyer.name AS buyer_name, farmer.name AS farmer_name
@@ -2811,11 +2756,8 @@ def admin_dashboard_payload():
         ORDER BY o.id DESC
         LIMIT 5
         """,
-        fetch=True,
         default=[],
-        context="admin dashboard recent orders",
-        required_tables=("orders", "users"),
-    )
+    ) if table_exists("orders") and table_exists("users") else []
     recent_products = safe_query(
         """
         SELECT p.id, p.crop_name, p.quantity, p.price, p.status, p.created_at, u.name AS farmer_name
@@ -2824,11 +2766,8 @@ def admin_dashboard_payload():
         ORDER BY p.id DESC
         LIMIT 5
         """,
-        fetch=True,
         default=[],
-        context="admin dashboard recent products",
-        required_tables=("products", "users"),
-    )
+    ) if table_exists("products") and table_exists("users") else []
     activity_logs = safe_query(
         """
         SELECT al.id, al.action, al.details, al.created_at, u.name AS user_name
@@ -2837,11 +2776,8 @@ def admin_dashboard_payload():
         ORDER BY al.id DESC
         LIMIT 10
         """,
-        fetch=True,
         default=[],
-        context="admin dashboard activity logs",
-        required_tables=("activity_logs", "users"),
-    )
+    ) if table_exists("activity_logs") and table_exists("users") else []
     revenue = (revenue_data.get("actual_revenue") or 0) + (revenue_data.get("estimated_revenue") or 0)
     pending_verifications = pending_farmers + pending_buyers
     return {
