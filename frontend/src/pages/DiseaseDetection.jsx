@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../services/api";
 import { AppStage, BottomNav, PhoneFrame, ScreenHeader } from "../components/MobileShell";
 import Toast from "../components/Toast";
@@ -8,16 +8,71 @@ export default function DiseaseDetection() {
   const [crop, setCrop] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const preview = useMemo(() => (image ? URL.createObjectURL(image) : ""), [image]);
 
-  const detect = async () => {
-    if (!image) {
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
+
+  useEffect(() => {
+    return () => {
+      closeCamera();
+    };
+  }, []);
+
+  const closeCamera = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraOpen(false);
+  };
+
+  const openCamera = async () => {
+    setToast("");
+    setResult(null);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setToast("Browser not supported. Please use image upload instead.");
+      return;
+    }
+
+    try {
+      closeCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      streamRef.current = stream;
+      setCameraOpen(true);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch (error) {
+      if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+        setToast("Camera permission denied. Please allow camera access or upload an image.");
+      } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+        setToast("Camera not available. Please connect a camera or upload an image.");
+      } else {
+        setToast("Unable to open camera. Please try again or upload an image.");
+      }
+      closeCamera();
+    }
+  };
+
+  const detect = async (selectedImage = image) => {
+    if (!selectedImage) {
       setToast("Upload a leaf image first.");
       return;
     }
     const payload = new FormData();
-    payload.append("image", image);
+    payload.append("image", selectedImage);
     if (crop) payload.append("crop_name", crop);
     setLoading(true);
     setToast("");
@@ -30,6 +85,36 @@ export default function DiseaseDetection() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const capturePhoto = async () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!cameraOpen || !video || !canvas || !streamRef.current) {
+      setToast("Open camera before capturing a photo.");
+      return;
+    }
+
+    if (!video.videoWidth || !video.videoHeight) {
+      setToast("Camera preview is still loading. Please try again.");
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        setToast("Could not capture photo. Please try again.");
+        return;
+      }
+
+      const capturedImage = new File([blob], `leaf-capture-${Date.now()}.jpg`, { type: "image/jpeg" });
+      setImage(capturedImage);
+      await detect(capturedImage);
+    }, "image/jpeg", 0.92);
   };
 
   return (
@@ -46,7 +131,27 @@ export default function DiseaseDetection() {
           ) : (
             <div className="mt-3 grid h-[205px] place-items-center rounded-lg bg-green-50 text-sm font-bold text-green-700">No image selected</div>
           )}
-          <button className="primary-green mt-5" onClick={detect} disabled={loading}>{loading ? "Checking..." : "Detect Disease"}</button>
+          <section className="mt-5 rounded-lg border border-green-100 bg-green-50 p-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <button className="primary-green" type="button" onClick={openCamera} disabled={loading}>
+                Open Camera
+              </button>
+              <button className="primary-green" type="button" onClick={capturePhoto} disabled={loading || !cameraOpen}>
+                Capture Photo
+              </button>
+              <button className="min-h-[42px] rounded-lg border border-green-700 bg-white px-4 text-sm font-extrabold text-green-700 disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={closeCamera} disabled={!cameraOpen}>
+                Close Camera
+              </button>
+            </div>
+            <div className="relative mt-3 overflow-hidden rounded-lg bg-slate-950">
+              <video ref={videoRef} className={`h-[205px] w-full object-cover ${cameraOpen ? "block" : "hidden"}`} autoPlay playsInline muted />
+              {!cameraOpen && (
+                <div className="grid h-[205px] place-items-center px-4 text-center text-sm font-bold text-green-100">Camera preview appears here</div>
+              )}
+            </div>
+            <canvas ref={canvasRef} className="hidden" />
+          </section>
+          <button className="primary-green mt-5" onClick={() => detect()} disabled={loading}>{loading ? "Checking..." : "Detect Disease"}</button>
           {result && (
             <section className="card mt-5 space-y-4 p-4">
               <div>
