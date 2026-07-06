@@ -6,7 +6,7 @@ export default function RoleBasedRoute({ roles = [], children, forbidden = null 
   const user = getStoredUser();
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute allowedRoles={roles}>
       {roles.length === 0 || hasRole(user, roles) ? children : forbidden || (
         <div className="grid min-h-screen place-items-center bg-gray-50 p-6">
           <div className="card max-w-md p-6 text-center">

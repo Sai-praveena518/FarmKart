@@ -4,6 +4,7 @@ export const normalizeRole = (role) => {
     superadmin: "SuperAdmin",
     "super admin": "SuperAdmin",
     super_admin: "SuperAdmin",
+    "super-admin": "SuperAdmin",
     admin: "Admin",
     farmer: "Farmer",
     buyer: "Buyer",
@@ -13,7 +14,11 @@ export const normalizeRole = (role) => {
 
 export const roleKey = (role) => normalizeRole(role).toLowerCase();
 
-export const hasRole = (user, roles = []) => roles.map(roleKey).includes(roleKey(user?.role));
+export const hasRole = (user, roles = []) => {
+  const userRole = (user?.role || "").toLowerCase();
+  const allowed = roles.map((role) => role.toLowerCase()).includes(userRole);
+  return allowed || roles.map(roleKey).includes(roleKey(user?.role));
+};
 
 export const getStoredUser = () => {
   try {
