@@ -30,6 +30,7 @@ import Notifications from "./pages/Notifications";
 import FeatureHub from "./pages/FeatureHub";
 import Forbidden from "./pages/Forbidden";
 import RoleBasedRoute from "./components/RoleBasedRoute";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
@@ -68,7 +69,7 @@ function App() {
 
         <Route
           path="/admin/dashboard"
-          element={<RoleBasedRoute roles={["Admin", "SuperAdmin"]} forbidden={<Forbidden />}><AdminDashboard /></RoleBasedRoute>}
+          element={<ProtectedRoute allowedRoles={["Admin", "SuperAdmin"]}><AdminDashboard /></ProtectedRoute>}
         />
 
         <Route
