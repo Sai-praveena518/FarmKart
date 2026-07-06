@@ -7,6 +7,14 @@ import { getStoredUser, userLocation } from "../utils/auth";
 const weatherIconUrl = (icon) => icon ? `https://openweathermap.org/img/wn/${icon}@2x.png` : "";
 const formatValue = (value, suffix = "") => value === null || value === undefined || value === "" ? "--" : `${value}${suffix}`;
 const kmVisibility = (value) => value === null || value === undefined ? "--" : `${(Number(value) / 1000).toFixed(1)} km`;
+const rainStatus = (weather) => {
+  if (typeof weather.rain_probability === "number" && Number.isFinite(weather.rain_probability)) {
+    return `Rain ${weather.rain_probability}%`;
+  }
+
+  const condition = weather.condition || weather.weather_condition || "";
+  return /rain|drizzle|thunderstorm/i.test(condition) ? "Rain Possible" : "Rain Not Expected";
+};
 
 export default function WeatherCard({ refreshKey = "" }) {
   const [weather, setWeather] = useState(null);
@@ -61,7 +69,7 @@ export default function WeatherCard({ refreshKey = "" }) {
             <span className="rounded-lg bg-gray-50 p-2"><FaWind className="mb-1 text-gray-600" /> Wind {formatValue(weather.wind_speed, " m/s")}</span>
             <span className="rounded-lg bg-purple-50 p-2"><FaCompressArrowsAlt className="mb-1 text-purple-600" /> Pressure {formatValue(weather.pressure, " hPa")}</span>
             <span className="rounded-lg bg-sky-50 p-2"><FaEye className="mb-1 text-sky-600" /> Visibility {kmVisibility(weather.visibility)}</span>
-            <span className="rounded-lg bg-green-50 p-2">Rain {weather.rain_probability ?? "N/A"}%</span>
+            <span className="rounded-lg bg-green-50 p-2">{rainStatus(weather)}</span>
           </div>
           <div className="mt-3 grid gap-2 text-xs font-bold text-gray-700 sm:grid-cols-2">
             <span className="rounded-lg bg-yellow-50 p-2">Sunrise {weather.sunrise || "--"}</span>
