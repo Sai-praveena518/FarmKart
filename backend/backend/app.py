@@ -98,7 +98,12 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-this-secret-in-produc
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", app.config["SECRET_KEY"])
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
-CORS(app, resources={r"/*": {"origins": os.getenv("CORS_ORIGINS", "*").split(",")}})
+default_cors_origins = ["http://localhost:5173", "https://farm-kart-swart.vercel.app"]
+configured_cors_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "").split(",") if origin.strip()]
+cors_origins = configured_cors_origins + [origin for origin in default_cors_origins if origin not in configured_cors_origins]
+if "*" in configured_cors_origins:
+    cors_origins = "*"
+CORS(app, resources={r"/*": {"origins": cors_origins}})
 serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
 jwt = JWTManager(app)
 
@@ -2518,7 +2523,23 @@ def admin_stats():
     })
 
 
-def safe_query(sql, params=None, fetch=False, one=False, default=None, context="admin dashboard query"):
+def dashboard_table_exists(table_name):
+    try:
+        return bool(query("SHOW TABLES LIKE %s", (table_name,), fetch=True, one=True))
+    except Exception as e:
+        print(f"admin dashboard table check failed for {table_name}: {e}")
+        traceback.print_exc()
+        return False
+
+
+def dashboard_tables_exist(table_names):
+    return all(dashboard_table_exists(table_name) for table_name in table_names)
+
+
+def safe_query(sql, params=None, fetch=False, one=False, default=None, context="admin dashboard query", required_tables=None):
+    if required_tables and not dashboard_tables_exist(required_tables):
+        print(f"{context} skipped: missing table in {', '.join(required_tables)}")
+        return default
     try:
         result = query(sql, params or (), fetch=fetch, one=one)
         if result is None:
@@ -2531,6 +2552,9 @@ def safe_query(sql, params=None, fetch=False, one=False, default=None, context="
 
 
 def safe_count(table_name):
+    if not dashboard_table_exists(table_name):
+        print(f"safe_count skipped: missing table {table_name}")
+        return 0
     try:
         result = query(f"SELECT COUNT(*) AS total FROM {table_name}", fetch=True, one=True)
         return result["total"] if result else 0
@@ -2548,11 +2572,12 @@ def safe_count_where(table_name, where_clause, params=None):
         one=True,
         default={"total": 0},
         context=f"admin dashboard count {table_name}",
+        required_tables=(table_name,),
     )
     return result["total"] if result else 0
 
 
-def safe_sum(sql, params=None):
+def safe_sum(sql, params=None, required_tables=None):
     result = safe_query(
         sql,
         params or (),
@@ -2560,6 +2585,7 @@ def safe_sum(sql, params=None):
         one=True,
         default={"value": 0},
         context="admin dashboard sum",
+        required_tables=required_tables,
     )
     return result["value"] if result else 0
 
@@ -2567,6 +2593,68 @@ def safe_sum(sql, params=None):
 def safe_count_users_by_role(role, extra_condition=""):
     clause, values = role_in_clause("role", [role])
     return safe_count_where("users", f"{clause}{extra_condition}", values)
+
+
+def admin_dashboard_fallback_payload():
+    return {
+        "actual_revenue": 0,
+        "estimated_revenue": 0,
+        "pending_payments": 0,
+        "revenue": 0,
+        "total_revenue": 0,
+        "total_users": 0,
+        "total_farmers": 0,
+        "farmers": 0,
+        "verified_farmers": 0,
+        "verified_buyers": 0,
+        "pending_farmers": 0,
+        "pending_buyers": 0,
+        "pending_verification": 0,
+        "pending_verifications": 0,
+        "total_buyers": 0,
+        "buyers": 0,
+        "total_admins": 0,
+        "total_products": 0,
+        "products": 0,
+        "pending_products": 0,
+        "total_orders": 0,
+        "orders": 0,
+        "payments": 0,
+        "complaints": 0,
+        "transport_requests": 0,
+        "weather_requests": 0,
+        "disease_detection_requests": 0,
+        "price_predictions": 0,
+        "ai_predictions": 0,
+        "analytics": 0,
+        "ai_usage": 0,
+        "daily_active_users": 0,
+        "total_ai_price_predictions": 0,
+        "total_disease_detection_requests": 0,
+        "pending_orders": 0,
+        "approved_orders": 0,
+        "completed_orders": 0,
+        "rejected_orders": 0,
+        "accepted_orders": 0,
+        "delivered_orders": 0,
+        "cancelled_orders": 0,
+        "paid_orders": 0,
+        "popular_crops": [],
+        "most_predicted_crops": [],
+        "most_requested_crop_disease_checks": [],
+        "top_farmers": [],
+        "top_buyers": [],
+        "recent_users": [],
+        "recent_registrations": [],
+        "recent_farmers": [],
+        "recent_buyers": [],
+        "recent_orders": [],
+        "recentOrders": [],
+        "recentFarmers": [],
+        "recentBuyers": [],
+        "recent_products": [],
+        "activity_logs": [],
+    }
 
 
 def admin_dashboard_payload():
@@ -2589,20 +2677,25 @@ def admin_dashboard_payload():
     pending_products = safe_count_where("products", "status='Pending'")
     payments = safe_count("payments")
     daily_active_users = safe_count_where("users", "last_login_at >= NOW() - INTERVAL 1 DAY")
-    actual_revenue = safe_sum("SELECT COALESCE(SUM(amount), 0) AS value FROM payments WHERE payment_status='Paid'")
+    actual_revenue = safe_sum(
+        "SELECT COALESCE(SUM(amount), 0) AS value FROM payments WHERE payment_status='Paid'",
+        required_tables=("payments",),
+    )
     estimated_revenue = safe_sum(
         """
         SELECT COALESCE(SUM(total_price), 0) AS value
         FROM orders
         WHERE status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status <> 'Paid'
-        """
+        """,
+        required_tables=("orders",),
     )
     pending_payments = safe_sum(
         """
         SELECT COALESCE(SUM(total_price), 0) AS value
         FROM orders
         WHERE status IN ('Accepted', 'Packed', 'Shipped', 'Delivered') AND payment_status='Pending'
-        """
+        """,
+        required_tables=("orders",),
     )
     total_orders = safe_count("orders")
     revenue_data = {
@@ -2626,6 +2719,7 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard popular crops",
+        required_tables=("products",),
     )
     most_predicted_crops = safe_query(
         """
@@ -2638,6 +2732,7 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard predicted crops",
+        required_tables=("price_predictions",),
     )
     disease_crop_checks = safe_query(
         """
@@ -2650,6 +2745,7 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard disease crops",
+        required_tables=("disease_history",),
     )
     top_farmers = safe_query(
         f"""
@@ -2665,6 +2761,7 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard top farmers",
+        required_tables=("users", "orders"),
     )
     top_buyers = safe_query(
         f"""
@@ -2680,12 +2777,30 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard top buyers",
+        required_tables=("users", "orders"),
     )
     recent_users = safe_query(
         "SELECT id, name, email, role, village, district, created_at FROM users ORDER BY id DESC LIMIT 5",
         fetch=True,
         default=[],
         context="admin dashboard recent users",
+        required_tables=("users",),
+    )
+    recent_farmers = safe_query(
+        f"SELECT id, name, email, role, village, district, created_at FROM users WHERE {farmer_clause} ORDER BY id DESC LIMIT 5",
+        farmer_values,
+        fetch=True,
+        default=[],
+        context="admin dashboard recent farmers",
+        required_tables=("users",),
+    )
+    recent_buyers = safe_query(
+        f"SELECT id, name, email, role, village, district, created_at FROM users WHERE {buyer_clause} ORDER BY id DESC LIMIT 5",
+        buyer_values,
+        fetch=True,
+        default=[],
+        context="admin dashboard recent buyers",
+        required_tables=("users",),
     )
     recent_orders = safe_query(
         """
@@ -2699,6 +2814,7 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard recent orders",
+        required_tables=("orders", "users"),
     )
     recent_products = safe_query(
         """
@@ -2711,6 +2827,7 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard recent products",
+        required_tables=("products", "users"),
     )
     activity_logs = safe_query(
         """
@@ -2723,6 +2840,7 @@ def admin_dashboard_payload():
         fetch=True,
         default=[],
         context="admin dashboard activity logs",
+        required_tables=("activity_logs", "users"),
     )
     revenue = (revenue_data.get("actual_revenue") or 0) + (revenue_data.get("estimated_revenue") or 0)
     pending_verifications = pending_farmers + pending_buyers
@@ -2770,7 +2888,12 @@ def admin_dashboard_payload():
         "top_buyers": top_buyers,
         "recent_users": recent_users,
         "recent_registrations": recent_users,
+        "recent_farmers": recent_farmers,
+        "recent_buyers": recent_buyers,
         "recent_orders": recent_orders,
+        "recentOrders": recent_orders,
+        "recentFarmers": recent_farmers,
+        "recentBuyers": recent_buyers,
         "recent_products": recent_products,
         "activity_logs": activity_logs,
     }
@@ -2780,7 +2903,14 @@ def admin_dashboard_payload():
 @app.get("/admin/dashboard")
 @auth_required("Admin", "SuperAdmin")
 def admin_dashboard():
-    return jsonify(admin_dashboard_payload())
+    try:
+        return jsonify(admin_dashboard_payload())
+    except Exception as e:
+        print(f"admin_dashboard failed: {e}")
+        traceback.print_exc()
+        payload = admin_dashboard_fallback_payload()
+        payload["warning"] = "Admin dashboard loaded with fallback data."
+        return jsonify(payload), 200
 
 
 @app.get("/api/admin/analytics")
