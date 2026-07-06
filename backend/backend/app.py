@@ -990,6 +990,25 @@ def db_error_response(error):
     return jsonify({"message": "Database error during registration.", "details": message}), 500
 
 
+def is_schema_error(error):
+    message = str(error).lower()
+    return "unknown column" in message or "doesn't exist" in message or "does not exist" in message
+
+
+def admin_dashboard_error_response(error, retry_attempted=False):
+    print("Admin dashboard load failed")
+    traceback.print_exc()
+    message = str(error)
+    if isinstance(error, MySQLError):
+        if is_schema_error(error):
+            hint = "Database schema is not ready for admin dashboard. Startup migrations were attempted."
+            if retry_attempted:
+                hint = "Database schema is still not ready after retrying startup migrations."
+            return jsonify({"message": hint, "details": message}), 500
+        return jsonify({"message": "Database error while loading admin dashboard.", "details": message}), 500
+    return jsonify({"message": "Unexpected error while loading admin dashboard.", "details": message}), 500
+
+
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -2481,8 +2500,8 @@ def admin_stats():
         """
         SELECT o.*, buyer.name AS buyer_name, farmer.name AS farmer_name
         FROM orders o
-        JOIN users buyer ON buyer.id=o.buyer_id
-        JOIN users farmer ON farmer.id=o.farmer_id
+        LEFT JOIN users buyer ON buyer.id=o.buyer_id
+        LEFT JOIN users farmer ON farmer.id=o.farmer_id
         ORDER BY o.id DESC
         LIMIT 5
         """,
@@ -2581,24 +2600,27 @@ def admin_dashboard_payload():
         """
         SELECT o.*, buyer.name AS buyer_name, farmer.name AS farmer_name
         FROM orders o
-        JOIN users buyer ON buyer.id=o.buyer_id
-        JOIN users farmer ON farmer.id=o.farmer_id
+        LEFT JOIN users buyer ON buyer.id=o.buyer_id
+        LEFT JOIN users farmer ON farmer.id=o.farmer_id
         ORDER BY o.id DESC
         LIMIT 5
         """,
         fetch=True,
     )
     revenue = (revenue_data.get("actual_revenue") or 0) + (revenue_data.get("estimated_revenue") or 0)
+    pending_verifications = pending_farmers + pending_buyers
     return {
         **revenue_data,
         "revenue": revenue,
+        "total_revenue": revenue,
         "total_users": query("SELECT COUNT(*) AS value FROM users", fetch=True, one=True)["value"],
         "total_farmers": count_users_by_role("Farmer"),
         "verified_farmers": verified_farmers,
         "verified_buyers": verified_buyers,
         "pending_farmers": pending_farmers,
         "pending_buyers": pending_buyers,
-        "pending_verification": pending_farmers + pending_buyers,
+        "pending_verification": pending_verifications,
+        "pending_verifications": pending_verifications,
         "total_buyers": count_users_by_role("Buyer"),
         "total_admins": count_users_by_role("Admin"),
         "total_products": query("SELECT COUNT(*) AS value FROM products", fetch=True, one=True)["value"],
@@ -2625,17 +2647,32 @@ def admin_dashboard_payload():
     }
 
 
+def admin_dashboard_response():
+    try:
+        return jsonify(admin_dashboard_payload())
+    except MySQLError as error:
+        if is_schema_error(error):
+            try:
+                init_database()
+                return jsonify(admin_dashboard_payload())
+            except Exception as retry_error:
+                return admin_dashboard_error_response(retry_error, retry_attempted=True)
+        return admin_dashboard_error_response(error)
+    except Exception as error:
+        return admin_dashboard_error_response(error)
+
+
 @app.get("/api/admin/dashboard")
 @app.get("/admin/dashboard")
 @auth_required("Admin", "SuperAdmin")
 def admin_dashboard():
-    return jsonify(admin_dashboard_payload())
+    return admin_dashboard_response()
 
 
 @app.get("/api/admin/analytics")
 @auth_required("Admin", "SuperAdmin")
 def admin_analytics():
-    return jsonify(admin_dashboard_payload())
+    return admin_dashboard_response()
 
 
 def platform_charts():

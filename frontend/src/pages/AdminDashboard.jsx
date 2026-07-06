@@ -32,7 +32,15 @@ export default function AdminDashboard() {
     api
       .get("/api/admin/dashboard")
       .then((res) => setStats(res.data))
-      .catch((apiError) => setError(apiError.response?.status === 403 ? "403" : apiError.response?.data?.message || "Unable to load admin dashboard."))
+      .catch((apiError) => {
+        console.error("Admin dashboard API failed", {
+          url: apiError.config?.url,
+          status: apiError.response?.status,
+          data: apiError.response?.data,
+          message: apiError.message,
+        });
+        setError(apiError.response?.status === 403 ? "403" : apiError.response?.data?.message || "Unable to load admin dashboard.");
+      })
       .finally(() => setLoading(false));
   }, []);
 
