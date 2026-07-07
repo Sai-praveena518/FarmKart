@@ -2777,7 +2777,9 @@ def admin_dashboard_payload():
     }
 
 
+@app.get("/api/admin/dashboard")
 @app.get("/api/admin/dashboard-lite")
+@app.get("/admin/dashboard")
 @auth_required("Admin", "SuperAdmin")
 def admin_dashboard_lite():
     return jsonify({
