@@ -2777,64 +2777,34 @@ def admin_dashboard_payload():
     }
 
 
-@app.get("/api/admin/dashboard")
-@app.get("/admin/dashboard")
+@app.get("/api/admin/dashboard-lite")
 @auth_required("Admin", "SuperAdmin")
-def admin_dashboard():
-    def count(sql, params=()):
-        try:
-            row = query(sql, params, fetch=True, one=True)
-            return int(row.get("value") or 0) if row else 0
-        except Exception as e:
-            print("Dashboard count error:", e)
-            return 0
-
-    def rows(sql, params=()):
-        try:
-            return query(sql, params, fetch=True) or []
-        except Exception as e:
-            print("Dashboard rows error:", e)
-            return []
-
-    payload = {
-        "total_farmers": count("SELECT COUNT(*) AS value FROM users WHERE role='Farmer'"),
-        "total_buyers": count("SELECT COUNT(*) AS value FROM users WHERE role='Buyer'"),
-        "total_products": count("SELECT COUNT(*) AS value FROM products"),
-        "total_orders": count("SELECT COUNT(*) AS value FROM orders"),
-        "revenue": count("SELECT COALESCE(SUM(total_price),0) AS value FROM orders"),
-        "actual_revenue": count("SELECT COALESCE(SUM(amount),0) AS value FROM payments WHERE payment_status='Paid'"),
-        "estimated_revenue": count("SELECT COALESCE(SUM(total_price),0) AS value FROM orders"),
-        "pending_orders": count("SELECT COUNT(*) AS value FROM orders WHERE status='Pending'"),
-        "approved_orders": count("SELECT COUNT(*) AS value FROM orders WHERE status IN ('Accepted','Delivered')"),
-        "rejected_orders": count("SELECT COUNT(*) AS value FROM orders WHERE status IN ('Rejected','Cancelled')"),
-        "pending_farmers": count("SELECT COUNT(*) AS value FROM users WHERE role='Farmer' AND is_verified=FALSE"),
-        "pending_products": count("SELECT COUNT(*) AS value FROM products WHERE status='Pending'"),
-        "verified_farmers": count("SELECT COUNT(*) AS value FROM users WHERE role='Farmer' AND is_verified=TRUE"),
-        "complaints": count("SELECT COUNT(*) AS value FROM complaints"),
-        "transport_requests": count("SELECT COUNT(*) AS value FROM transport_requests"),
-        "total_ai_price_predictions": count("SELECT COUNT(*) AS value FROM price_predictions"),
-        "total_disease_detection_requests": count("SELECT COUNT(*) AS value FROM disease_history"),
-        "recent_registrations": rows("SELECT id,name,email,role,village,district,created_at FROM users ORDER BY id DESC LIMIT 5"),
-        "recent_orders": rows("""
-            SELECT o.id,o.crop_name,o.quantity,o.total_price,o.status,
-                   buyer.name AS buyer_name, farmer.name AS farmer_name
-            FROM orders o
-            LEFT JOIN users buyer ON buyer.id=o.buyer_id
-            LEFT JOIN users farmer ON farmer.id=o.farmer_id
-            ORDER BY o.id DESC LIMIT 5
-        """),
-        "popular_crops": rows("SELECT crop_name, COUNT(*) AS value FROM products GROUP BY crop_name ORDER BY value DESC LIMIT 5"),
+def admin_dashboard_lite():
+    return jsonify({
+        "total_farmers": 0,
+        "total_buyers": 0,
+        "total_products": 0,
+        "total_orders": 0,
+        "revenue": 0,
+        "actual_revenue": 0,
+        "estimated_revenue": 0,
+        "pending_orders": 0,
+        "approved_orders": 0,
+        "rejected_orders": 0,
+        "pending_farmers": 0,
+        "pending_products": 0,
+        "complaints": 0,
+        "transport_requests": 0,
+        "total_ai_price_predictions": 0,
+        "total_disease_detection_requests": 0,
+        "verified_farmers": 0,
+        "recent_registrations": [],
+        "recent_orders": [],
+        "popular_crops": [],
         "most_predicted_crops": [],
-        "most_requested_crop_disease_checks": [],
-    }
-
-    return jsonify(payload), 200
-
-@app.get("/api/admin/analytics")
-@auth_required("Admin", "SuperAdmin")
-def admin_analytics():
-    return jsonify(admin_dashboard_payload()), 200
-
+        "most_requested_crop_disease_checks": []
+    }), 200
+    
 @app.get("/api/superadmin/users")
 @app.get("/api/admin/users")
 @auth_required("Admin", "SuperAdmin")
